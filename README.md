@@ -1,73 +1,56 @@
-# Welcome to your Lovable project
+# Meanwhile
 
-## Project info
+**Schedule with friends, effortlessly.**
 
-**URL**: https://lovable.dev/projects/18f91b35-7788-4417-8e07-61e4f488157f
+A beautiful group scheduling app that makes coordinating with friends simple and intuitive. No email required, no complicated setup - just clean, visual scheduling.
 
-## How can I edit this code?
+![Meanwhile Screenshot](https://img.shields.io/badge/status-active-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue)
 
-There are several ways of editing your application.
+## ✨ Features
 
-**Use Lovable**
+- **🎨 Visual Scheduling** - Beautiful color-coded weekly calendars
+- **👥 Group Collaboration** - Share simple 6-character codes with friends  
+- **⏰ Smart Free Time Detection** - Automatically find when everyone is available
+- **✨ No Email Required** - Sign up instantly with just username/password
+- **🎯 Interactive Calendar** - Double-click to create events, drag to resize
+- **📱 Responsive Design** - Works perfectly on desktop, tablet, and mobile
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/18f91b35-7788-4417-8e07-61e4f488157f) and start prompting.
+## 🚀 Quick Start
 
-Changes made via Lovable will be committed automatically to this repo.
+1. **Clone and install:**
+   ```bash
+   git clone <repository-url>
+   cd meanwhile
+   npm install
+   ```
 
-**Use your preferred IDE**
+2. **Start developing:**
+   ```bash
+   npm run dev
+   ```
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+3. **Open [http://localhost:5173](http://localhost:5173)**
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+That's it! No database setup, no complicated configuration.
 
-Follow these steps:
+## 💡 How It Works
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+1. **Create an account** - Just username and password
+2. **Create or join groups** - Share simple 6-character codes
+3. **Add your schedule** - Color-coded time blocks with categories
+4. **Find free time together** - Visual overlap detection shows when everyone's available
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+## 🛠️ Built With
 
-# Step 3: Install the necessary dependencies.
-npm i
+- **React + TypeScript** - Modern, type-safe development
+- **Tailwind CSS** - Beautiful, responsive styling
+- **Local Storage** - Simple, privacy-focused data persistence
+- **Custom Typography** - Instrument Serif + Geist fonts
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+## 📝 License
 
-**Edit a file directly in GitHub**
+MIT © 2025 Arik Karim
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+---
 
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/18f91b35-7788-4417-8e07-61e4f488157f) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+*Made with ❤️ for better group coordination*

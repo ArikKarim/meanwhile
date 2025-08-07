@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Edit3, Trash2 } from 'lucide-react';
 
 interface TimeBlock {
   id: string;
@@ -11,180 +16,840 @@ interface TimeBlock {
   end_time: string;
   color: string;
   tag: string;
-  username?: string;
+  displayName?: string;
 }
 
 interface WeeklyCalendarProps {
   groupId: string;
   viewMode: 'busy' | 'free';
+  visibleUsers?: Set<string>;
 }
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = Array.from({ length: 15 }, (_, i) => i + 7); // 7 AM to 9 PM
 
-const WeeklyCalendar = ({ groupId, viewMode }: WeeklyCalendarProps) => {
-  const { user } = useAuth();
+// User color system (replaces category-based colors)
+const USER_COLORS_KEY = 'meanwhile_user_colors';
+
+interface UserColors {
+  [userId: string]: string;
+}
+
+const getUserColors = (): UserColors => {
+  try {
+    const stored = localStorage.getItem(USER_COLORS_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+};
+
+const getUserColor = (userId: string): string => {
+  const userColors = getUserColors();
+  return userColors[userId] || '#3b82f6'; // Default blue if no color set
+};
+
+// Category options (no colors, just tags)
+const CATEGORIES = [
+  { label: 'Class', value: 'class' },
+  { label: 'Work', value: 'work' },
+  { label: 'Personal', value: 'personal' },
+  { label: 'Other', value: 'other' }
+];
+
+// Overlap detection utilities
+const timeToMinutes = (timeString: string): number => {
+  const [hours, minutes] = timeString.split(':').map(Number);
+  return hours * 60 + minutes;
+};
+
+const doTimeBlocksOverlap = (block1: TimeBlock, block2: TimeBlock): boolean => {
+  // Only check if they're on the same day
+  if (block1.day_of_week !== block2.day_of_week) return false;
+  
+  const start1 = timeToMinutes(block1.start_time);
+  const end1 = timeToMinutes(block1.end_time);
+  const start2 = timeToMinutes(block2.start_time);
+  const end2 = timeToMinutes(block2.end_time);
+  
+  // Check if there's any overlap
+  return start1 < end2 && start2 < end1;
+};
+
+const getOverlapLevel = (block: TimeBlock, allBlocks: TimeBlock[]): { selfOverlap: boolean, otherOverlap: boolean } => {
+  let selfOverlap = false;
+  let otherOverlap = false;
+  
+  allBlocks.forEach(otherBlock => {
+    if (otherBlock.id !== block.id && doTimeBlocksOverlap(block, otherBlock)) {
+      if (otherBlock.user_id === block.user_id) {
+        selfOverlap = true;
+      } else {
+        otherOverlap = true;
+      }
+    }
+  });
+  
+  return { selfOverlap, otherOverlap };
+};
+
+// Simple localStorage access
+const TIME_BLOCKS_KEY = 'meanwhile_time_blocks';
+const USERS_KEY = 'meanwhile_users';
+const GROUP_MEMBERS_KEY = 'meanwhile_group_members';
+
+interface StoredUser {
+  id: string;
+  username: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+}
+
+interface GroupMember {
+  id: string;
+  group_id: string;
+  user_id: string;
+  joined_at: string;
+}
+
+interface StoredTimeBlock {
+  id: string;
+  user_id: string;
+  group_id: string;
+  label: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  color: string;
+  tag: string;
+  created_at: string;
+}
+
+const getTimeBlocks = (): StoredTimeBlock[] => {
+  try {
+    const stored = localStorage.getItem(TIME_BLOCKS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const getUsers = (): StoredUser[] => {
+  try {
+    const stored = localStorage.getItem(USERS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const getGroupMembers = (): GroupMember[] => {
+  try {
+    const stored = localStorage.getItem(GROUP_MEMBERS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const getDisplayName = (user: StoredUser | undefined): string => {
+  if (!user) return 'Unknown User';
+  if (!user.firstName && !user.lastName) return user.username;
+  
+  const firstName = user.firstName?.trim() || '';
+  const lastInitial = user.lastName?.trim()?.charAt(0)?.toUpperCase() || '';
+  
+  if (firstName && lastInitial) {
+    return `${firstName} ${lastInitial}`;
+  } else if (firstName) {
+    return firstName;
+  } else if (user.lastName) {
+    return user.lastName;
+  }
+  
+  return user.username;
+};
+
+const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps) => {
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editingBlock, setEditingBlock] = useState<TimeBlock | null>(null);
+  const [editForm, setEditForm] = useState({
+    label: '',
+    start_time: '',
+    end_time: '',
+    tag: 'class'
+  });
+  
+  // New interactive features state
+  const [dragState, setDragState] = useState<{
+    blockId: string | null;
+    dragType: 'top' | 'bottom' | null;
+    startY: number;
+    originalStart: string;
+    originalEnd: string;
+  }>({
+    blockId: null,
+    dragType: null,
+    startY: 0,
+    originalStart: '',
+    originalEnd: ''
+  });
+  
+  const [showQuickCreate, setShowQuickCreate] = useState<{
+    day: number;
+    hour: number;
+    show: boolean;
+  }>({ day: 0, hour: 0, show: false });
+  
+  const { user } = useAuth();
+
+  const saveTimeBlocks = (blocks: StoredTimeBlock[]) => {
+    localStorage.setItem(TIME_BLOCKS_KEY, JSON.stringify(blocks));
+  };
+
+  const handleEditBlock = (block: TimeBlock) => {
+    setEditingBlock(block);
+    setEditForm({
+      label: block.label,
+      start_time: block.start_time,
+      end_time: block.end_time,
+      tag: block.tag
+    });
+  };
+
+  const handleUpdateBlock = async () => {
+    if (!editingBlock || !user) return;
+
+    try {
+      const allTimeBlocks = getTimeBlocks();
+      const updatedBlocks = allTimeBlocks.map(block => 
+        block.id === editingBlock.id 
+          ? { 
+              ...block, 
+              ...editForm,
+              color: getUserColor(user?.id || '') // Set color based on user
+            }
+          : block
+      );
+      
+      saveTimeBlocks(updatedBlocks);
+      setEditingBlock(null);
+      
+      // Refresh the display
+      fetchTimeBlocks();
+    } catch (error) {
+      console.error('Error updating time block:', error);
+    }
+  };
+
+  const handleDeleteBlock = async (blockId: string) => {
+    if (!user) return;
+
+    try {
+      const allTimeBlocks = getTimeBlocks();
+      const filteredBlocks = allTimeBlocks.filter(block => block.id !== blockId);
+      
+      saveTimeBlocks(filteredBlocks);
+      
+      // Refresh the display
+      fetchTimeBlocks();
+    } catch (error) {
+      console.error('Error deleting time block:', error);
+    }
+  };
+
+  // Interactive calendar functions
+  const minutesToTime = (minutes: number): string => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+  };
+
+  const handleDoubleClick = (dayIndex: number, hour: number, event: React.MouseEvent) => {
+    if (!user || viewMode !== 'busy') return;
+    
+    const rect = event.currentTarget.getBoundingClientRect();
+    const relativeY = event.clientY - rect.top;
+    
+    // Calculate minutes within the clicked hour cell (0-59)
+    const minutesInHour = (relativeY / rect.height) * 60;
+    
+    // Calculate total minutes from midnight using the actual hour value
+    const totalMinutes = hour * 60 + minutesInHour;
+    
+    // Snap to 15-minute increments
+    const snappedMinutes = Math.round(totalMinutes / 15) * 15;
+    
+    const startTime = minutesToTime(Math.min(snappedMinutes, 21 * 60)); // Cap at 9 PM
+    const startMinutes = timeToMinutes(startTime);
+    const endTime = minutesToTime(Math.min(startMinutes + 60, 21 * 60)); // Default 1 hour duration, cap at 9 PM
+    
+    // Create quick event
+    const newBlock = {
+      id: `tb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      user_id: user.id,
+      group_id: groupId,
+      label: 'New Event',
+      day_of_week: dayIndex,
+      start_time: startTime,
+      end_time: endTime,
+      color: getUserColor(user.id),
+      tag: 'class',
+      created_at: new Date().toISOString()
+    };
+    
+    // Add to storage
+    const allTimeBlocks = getTimeBlocks();
+    saveTimeBlocks([...allTimeBlocks, newBlock]);
+    
+    // Refresh display
+    fetchTimeBlocks();
+    
+    // Open edit dialog immediately
+    setEditingBlock({
+      ...newBlock,
+      displayName: user.firstName && user.lastName 
+        ? `${user.firstName} ${user.lastName.charAt(0)}`
+        : user.username
+    });
+    setEditForm({
+      label: newBlock.label,
+      start_time: newBlock.start_time,
+      end_time: newBlock.end_time,
+      tag: newBlock.tag
+    });
+  };
+
+  const handleMouseDown = (blockId: string, dragType: 'top' | 'bottom', event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    const block = timeBlocks.find(b => b.id === blockId);
+    if (!block || block.user_id !== user?.id) return;
+    
+    setDragState({
+      blockId,
+      dragType,
+      startY: event.clientY,
+      originalStart: block.start_time,
+      originalEnd: block.end_time
+    });
+  };
+
+  const handleMouseMove = (event: MouseEvent) => {
+    if (!dragState.blockId || !dragState.dragType) return;
+    
+    const deltaY = event.clientY - dragState.startY;
+    const deltaMinutes = Math.round((deltaY / 60) * 60); // 60px = 1 hour
+    
+    // Snap to 15-minute increments
+    const snappedDeltaMinutes = Math.round(deltaMinutes / 15) * 15;
+    
+    const block = timeBlocks.find(b => b.id === dragState.blockId);
+    if (!block) return;
+    
+    let newStart = timeToMinutes(dragState.originalStart);
+    let newEnd = timeToMinutes(dragState.originalEnd);
+    
+    if (dragState.dragType === 'top') {
+      newStart = Math.max(7 * 60, Math.min(newStart + snappedDeltaMinutes, newEnd - 15)); // Min 15 min duration
+    } else {
+      newEnd = Math.min(21 * 60, Math.max(newEnd + snappedDeltaMinutes, newStart + 15)); // Min 15 min duration
+    }
+    
+    // Update the time block temporarily (visual feedback)
+    setTimeBlocks(prev => prev.map(b => 
+      b.id === dragState.blockId 
+        ? { ...b, start_time: minutesToTime(newStart), end_time: minutesToTime(newEnd) }
+        : b
+    ));
+  };
+
+  const handleMouseUp = () => {
+    if (!dragState.blockId) return;
+    
+    // Save the changes permanently
+    const block = timeBlocks.find(b => b.id === dragState.blockId);
+    if (block && block.user_id === user?.id) {
+      const allTimeBlocks = getTimeBlocks();
+      const updatedBlocks = allTimeBlocks.map(b => 
+        b.id === dragState.blockId 
+          ? { ...b, start_time: block.start_time, end_time: block.end_time }
+          : b
+      );
+      saveTimeBlocks(updatedBlocks);
+    }
+    
+    setDragState({
+      blockId: null,
+      dragType: null,
+      startY: 0,
+      originalStart: '',
+      originalEnd: ''
+    });
+  };
+
+  // Add mouse event listeners
+  useEffect(() => {
+    if (dragState.blockId) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [dragState]);
+
+    const fetchTimeBlocks = async () => {
+    try {
+      setLoading(true);
+      
+      const allTimeBlocks = getTimeBlocks();
+      const allUsers = getUsers();
+      const groupMembers = getGroupMembers();
+      
+      // Filter time blocks for this group
+      const groupTimeBlocks = allTimeBlocks.filter(block => block.group_id === groupId);
+      
+      // Get member user IDs
+      const groupMemberIds = groupMembers
+        .filter(member => member.group_id === groupId)
+        .map(member => member.user_id);
+      
+      // Filter time blocks to only include group members
+      let memberTimeBlocks = groupTimeBlocks.filter(block => 
+        groupMemberIds.includes(block.user_id)
+      );
+      
+      // Apply user visibility filter for busy mode
+      if (viewMode === 'busy' && visibleUsers && visibleUsers.size > 0) {
+        memberTimeBlocks = memberTimeBlocks.filter(block => 
+          visibleUsers.has(block.user_id)
+        );
+      }
+      
+      // Add display names to time blocks
+      const blocksWithDisplayNames = memberTimeBlocks.map(block => {
+        const blockUser = allUsers.find(u => u.id === block.user_id);
+        return {
+          ...block,
+          displayName: getDisplayName(blockUser)
+        };
+      });
+
+      setTimeBlocks(blocksWithDisplayNames);
+    } catch (error) {
+      console.error('Error fetching time blocks:', error);
+      setTimeBlocks([]);
+    } finally {
+      setLoading(false);
+    }
+    };
 
   useEffect(() => {
     if (!groupId) return;
 
-    const fetchTimeBlocks = async () => {
-      setLoading(true);
-      
-      // First get time blocks
-      const { data: timeBlocksData, error: timeBlocksError } = await supabase
-        .from('time_blocks')
-        .select('*')
-        .eq('group_id', groupId);
-
-      if (timeBlocksError) {
-        console.error('Error fetching time blocks:', timeBlocksError);
-        setTimeBlocks([]);
-        return;
-      }
-
-      // Then get user profiles for the blocks
-      const userIds = [...new Set(timeBlocksData?.map(block => block.user_id) || [])];
-      const { data: profilesData, error: profilesError } = await supabase
-        .from('profiles')
-        .select('user_id, username')
-        .in('user_id', userIds);
-
-      if (profilesError) {
-        console.error('Error fetching profiles:', profilesError);
-      }
-
-      const profilesMap = new Map(
-        profilesData?.map(profile => [profile.user_id, profile.username]) || []
-      );
-
-      const blocksWithUsernames = timeBlocksData?.map(block => ({
-        ...block,
-        username: profilesMap.get(block.user_id) || 'Unknown'
-      })) || [];
-
-      setTimeBlocks(blocksWithUsernames);
-      
-      setLoading(false);
-    };
-
     fetchTimeBlocks();
 
-    // Set up realtime subscription
-    const channel = supabase
-      .channel('time_blocks_changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'time_blocks',
-          filter: `group_id=eq.${groupId}`
-        },
-        () => fetchTimeBlocks()
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [groupId]);
-
-  const timeToMinutes = (timeString: string) => {
-    const [hours, minutes] = timeString.split(':').map(Number);
-    return hours * 60 + minutes;
-  };
-
-  const getBlocksForDayAndHour = (dayIndex: number, hour: number) => {
-    return timeBlocks.filter(block => {
-      const blockStart = timeToMinutes(block.start_time);
-      const blockEnd = timeToMinutes(block.end_time);
-      const hourStart = hour * 60;
-      const hourEnd = (hour + 1) * 60;
-      
-      return block.day_of_week === dayIndex && 
-             blockStart < hourEnd && 
-             blockEnd > hourStart;
-    });
-  };
-
-  const getFreeTimeOverlap = (dayIndex: number, hour: number) => {
-    const blocks = getBlocksForDayAndHour(dayIndex, hour);
-    const totalUsers = new Set(timeBlocks.map(b => b.user_id)).size;
-    const busyUsers = new Set(blocks.map(b => b.user_id)).size;
+    // Set up polling to refresh data every 5 seconds
+    const interval = setInterval(fetchTimeBlocks, 5000);
     
-    return totalUsers > 0 ? ((totalUsers - busyUsers) / totalUsers) * 100 : 0;
+    return () => clearInterval(interval);
+  }, [groupId, visibleUsers]); // Added visibleUsers as dependency
+
+  const formatTime = (time: string) => {
+    const [hours, minutes] = time.split(':');
+    const hour = parseInt(hours);
+    const ampm = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour % 12 || 12;
+    return `${displayHour}:${minutes} ${ampm}`;
+  };
+
+  const getTimeBlocksForDay = (dayIndex: number) => {
+    return timeBlocks.filter(block => block.day_of_week === dayIndex);
+  };
+
+  // Calculate overlap positions for blocks on the same day
+  const calculateBlockPositions = (blocks: TimeBlock[]) => {
+    const blockPositions: Array<TimeBlock & { column: number, totalColumns: number }> = [];
+    
+    blocks.forEach((block, index) => {
+      // Find all blocks that overlap with this one
+      const overlappingBlocks = blocks.filter((otherBlock, otherIndex) => 
+        otherIndex !== index && doTimeBlocksOverlap(block, otherBlock)
+      );
+      
+      // Include the current block in the overlap group
+      const overlapGroup = [block, ...overlappingBlocks];
+      
+      // Sort by user_id to ensure consistent positioning
+      overlapGroup.sort((a, b) => a.user_id.localeCompare(b.user_id));
+      
+      const column = overlapGroup.findIndex(b => b.id === block.id);
+      const totalColumns = overlapGroup.length;
+      
+      blockPositions.push({
+        ...block,
+        column,
+        totalColumns
+      });
+    });
+    
+    return blockPositions;
+  };
+
+  const getBlockPosition = (startTime: string, endTime: string) => {
+    const [startHour, startMin] = startTime.split(':').map(Number);
+    const [endHour, endMin] = endTime.split(':').map(Number);
+    
+    const startMinutes = (startHour - 7) * 60 + startMin;
+    const endMinutes = (endHour - 7) * 60 + endMin;
+    
+    const top = (startMinutes / 60) * 60; // 60px per hour
+    const height = ((endMinutes - startMinutes) / 60) * 60;
+    
+    return { top, height };
+  };
+
+  const getFreeTimeBlocks = () => {
+    if (viewMode !== 'free') return [];
+
+    const freeBlocks: { day: number; start: number; end: number; overlap: number }[] = [];
+    
+    DAYS.forEach((_, dayIndex) => {
+      const dayBlocks = getTimeBlocksForDay(dayIndex);
+      const occupiedSlots = new Set<number>();
+      
+      // Mark occupied 30-minute slots
+      dayBlocks.forEach(block => {
+        const [startHour, startMin] = block.start_time.split(':').map(Number);
+        const [endHour, endMin] = block.end_time.split(':').map(Number);
+        
+        const startSlot = (startHour - 7) * 2 + Math.floor(startMin / 30);
+        const endSlot = (endHour - 7) * 2 + Math.floor(endMin / 30);
+        
+        for (let slot = startSlot; slot < endSlot; slot++) {
+          occupiedSlots.add(slot);
+        }
+      });
+      
+      // Find free time blocks (consecutive free slots)
+      let freeStart = null;
+      for (let slot = 0; slot < 30; slot++) { // 15 hours * 2 slots per hour
+        if (!occupiedSlots.has(slot)) {
+          if (freeStart === null) freeStart = slot;
+        } else {
+          if (freeStart !== null) {
+            const startHour = 7 + Math.floor(freeStart / 2);
+            const startMin = (freeStart % 2) * 30;
+            const endHour = 7 + Math.floor(slot / 2);
+            const endMin = (slot % 2) * 30;
+            
+            freeBlocks.push({
+              day: dayIndex,
+              start: startHour * 60 + startMin,
+              end: endHour * 60 + endMin,
+              overlap: 1
+            });
+            freeStart = null;
+          }
+        }
+      }
+      
+      // Handle case where free time extends to end of day
+      if (freeStart !== null) {
+        const startHour = 7 + Math.floor(freeStart / 2);
+        const startMin = (freeStart % 2) * 30;
+        freeBlocks.push({
+          day: dayIndex,
+          start: startHour * 60 + startMin,
+          end: 22 * 60, // 10 PM
+          overlap: 1
+        });
+      }
+    });
+    
+    return freeBlocks;
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      <div className="text-center py-8">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+        <p className="mt-2 text-muted-foreground">Loading calendar...</p>
       </div>
     );
   }
 
+  const freeTimeBlocks = getFreeTimeBlocks();
+
   return (
     <div className="w-full overflow-x-auto">
-      <div className="min-w-[800px] grid grid-cols-8 gap-1 bg-background">
+      <div className="min-w-[800px]">
+        {/* Overlap Summary */}
+        {viewMode === 'busy' && (() => {
+          const personalOverlaps = timeBlocks.filter(block => {
+            const { selfOverlap } = getOverlapLevel(block, timeBlocks);
+            return selfOverlap;
+          });
+
+          if (personalOverlaps.length > 0) {
+            return (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm font-medium text-red-800">⚠ Personal Scheduling Conflicts</span>
+                </div>
+                <div className="text-xs text-red-700">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 border-2 border-red-400 border-dashed rounded"></div>
+                    <span>{personalOverlaps.length} personal conflict{personalOverlaps.length !== 1 ? 's' : ''} found. You have overlapping activities in your schedule.</span>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+          return null;
+        })()}
+
         {/* Header */}
-        <div className="p-2 text-center font-medium text-muted-foreground">Time</div>
-        {DAYS.map(day => (
-          <div key={day} className="p-2 text-center font-medium text-foreground">
-            {day}
+        <div className="grid grid-cols-8 gap-1 mb-2">
+          <div className="text-center text-sm font-medium text-muted-foreground p-2">
+            Time
           </div>
-        ))}
-        
-        {/* Time slots */}
-        {HOURS.map(hour => (
-          <div key={hour} className="contents">
-            <div className="p-2 text-sm text-muted-foreground border-t">
-              {hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : `${hour} AM`}
+          {DAYS.map((day, index) => (
+            <div key={day} className="text-center text-sm font-medium text-muted-foreground p-2">
+            {day}
             </div>
-            {DAYS.map((_, dayIndex) => {
-              const blocks = getBlocksForDayAndHour(dayIndex, hour);
-              const freePercent = getFreeTimeOverlap(dayIndex, hour);
+          ))}
+        </div>
+
+        {/* Calendar Grid */}
+        <div className="grid grid-cols-8 gap-1">
+          {/* Time Column */}
+          <div className="space-y-0">
+            {HOURS.map((hour) => (
+              <div key={hour} className="h-[60px] text-xs text-muted-foreground border-r flex items-center justify-end pr-3 bg-slate-50/50">
+                <div className="text-right font-medium">
+                  {hour}:00
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Day Columns */}
+          {DAYS.map((day, dayIndex) => (
+            <div key={day} className="relative">
+              {/* Hour Grid Lines */}
+              {HOURS.map((hour) => (
+                <div 
+                  key={hour} 
+                  className="h-[60px] border border-muted/20 hover:bg-blue-50/30 transition-colors cursor-pointer"
+                  onDoubleClick={(e) => handleDoubleClick(dayIndex, hour, e)}
+                ></div>
+              ))}
+
+              {/* Time Blocks for Busy Mode */}
+              {viewMode === 'busy' && calculateBlockPositions(getTimeBlocksForDay(dayIndex)).map((block) => {
+                const { top, height } = getBlockPosition(block.start_time, block.end_time);
+                const isOwnBlock = block.user_id === user?.id;
+                const { selfOverlap } = getOverlapLevel(block, timeBlocks);
+                
+                // Calculate width and left position for overlapping blocks
+                const blockWidth = block.totalColumns > 1 ? `${100 / block.totalColumns}%` : '100%';
+                const leftPosition = block.totalColumns > 1 ? `${(block.column * 100) / block.totalColumns}%` : '0%';
+                
+                // Only show warning for personal overlaps (same user)
+                const showWarning = selfOverlap;
+                const borderStyle = showWarning ? 'border-2 border-red-400 border-dashed' : '';
+                const isDragging = dragState.blockId === block.id;
               
               return (
                 <div
-                  key={`${hour}-${dayIndex}`}
-                  className={`min-h-[60px] border border-border p-1 relative ${
-                    viewMode === 'free' 
-                      ? freePercent > 50 
-                        ? 'bg-green-100 dark:bg-green-900/20' 
-                        : 'bg-background'
-                      : 'bg-background'
-                  }`}
-                >
-                  {viewMode === 'busy' ? (
-                    blocks.map((block, index) => (
+                    key={block.id}
+                    className={`absolute rounded text-xs text-white p-1 overflow-hidden group ${borderStyle} ${
+                      isDragging ? 'opacity-80 shadow-lg z-50' : ''
+                    } ${isOwnBlock ? 'hover:shadow-md transition-shadow' : ''}`}
+                    style={{
+                      top: `${top}px`,
+                      height: `${height}px`,
+                      left: leftPosition,
+                      width: blockWidth,
+                      backgroundColor: block.color,
+                      minHeight: '20px',
+                      marginLeft: block.totalColumns > 1 ? '1px' : '4px',
+                      marginRight: block.totalColumns > 1 ? '1px' : '4px',
+                      cursor: isOwnBlock ? 'pointer' : 'default'
+                    }}
+                    onClick={() => isOwnBlock && handleEditBlock(block)}
+                  >
+                    {/* Drag handle - top */}
+                    {isOwnBlock && (
                       <div
-                        key={block.id}
-                        className="text-xs p-1 mb-1 rounded text-white font-medium"
-                        style={{ 
-                          backgroundColor: block.color,
-                          marginTop: `${index * 20}px`
-                        }}
-                      >
-                        <div className="truncate">{block.label}</div>
-                        <div className="truncate opacity-80">{block.username}</div>
+                        className="absolute top-0 left-0 right-0 h-1 bg-white/30 opacity-0 group-hover:opacity-100 cursor-n-resize transition-opacity"
+                        onMouseDown={(e) => handleMouseDown(block.id, 'top', e)}
+                        title="Drag to adjust start time"
+                      />
+                    )}
+                    
+                    <div className="font-medium truncate">{block.label}</div>
+                    <div className="text-xs opacity-90">
+                      {formatTime(block.start_time)} - {formatTime(block.end_time)}
+                    </div>
+                    {block.displayName && (
+                      <div className="text-xs opacity-75">{block.displayName}</div>
+                    )}
+                    
+                    {/* Drag handle - bottom */}
+                    {isOwnBlock && (
+                      <div
+                        className="absolute bottom-0 left-0 right-0 h-1 bg-white/30 opacity-0 group-hover:opacity-100 cursor-s-resize transition-opacity"
+                        onMouseDown={(e) => handleMouseDown(block.id, 'bottom', e)}
+                        title="Drag to adjust end time"
+                      />
+                    )}
+                    
+                    {/* Warning indicator only for personal overlaps */}
+                    {showWarning && (
+                      <div className="absolute top-0 left-0 w-full h-full pointer-events-none">
+                        <div className="absolute top-0 right-0 w-4 h-4 rounded-bl text-center text-xs font-bold leading-4 bg-red-500 text-white">
+                          ⚠
+                        </div>
                       </div>
-                    ))
-                  ) : (
-                    freePercent > 50 && (
-                      <div className="text-xs text-green-700 dark:text-green-300 font-medium">
-                        {Math.round(freePercent)}% free
+                    )}
+                    
+                    {/* Edit/Delete buttons for own blocks */}
+                    {isOwnBlock && !isDragging && (
+                      <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-5 w-5 p-0 bg-black/20 hover:bg-black/40 text-white"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditBlock(block);
+                          }}
+                        >
+                          <Edit3 className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-5 w-5 p-0 bg-black/20 hover:bg-red-500/80 text-white"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteBlock(block.id);
+                          }}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
                       </div>
-                    )
-                  )}
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Free Time Blocks */}
+              {viewMode === 'free' && freeTimeBlocks
+                .filter(block => block.day === dayIndex)
+                .map((block, index) => {
+                  const top = ((block.start - 7 * 60) / 60) * 60;
+                  const height = ((block.end - block.start) / 60) * 60;
+                  
+                  return (
+                    <div
+                      key={index}
+                      className="absolute left-0 right-0 mx-1 rounded text-xs text-white p-1"
+                      style={{
+                        top: `${top}px`,
+                        height: `${height}px`,
+                        backgroundColor: '#22c55e',
+                        opacity: 0.7,
+                        minHeight: '20px'
+                      }}
+                    >
+                      <div className="font-medium">Free Time</div>
                 </div>
               );
             })}
           </div>
         ))}
       </div>
+      </div>
+
+      {/* Edit Time Block Dialog */}
+      <Dialog open={!!editingBlock} onOpenChange={(open) => !open && setEditingBlock(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Edit Activity</DialogTitle>
+            <DialogDescription>
+              Make changes to your activity. Click save when you're done.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-label">Activity Name</Label>
+              <Input
+                id="edit-label"
+                value={editForm.label}
+                onChange={(e) => setEditForm(prev => ({ ...prev, label: e.target.value }))}
+                placeholder="What are you doing?"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-start">Start Time</Label>
+                <Input
+                  id="edit-start"
+                  type="time"
+                  value={editForm.start_time}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, start_time: e.target.value }))}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-end">End Time</Label>
+                <Input
+                  id="edit-end"
+                  type="time"
+                  value={editForm.end_time}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, end_time: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-tag">Category & Color</Label>
+              <div className="flex gap-2">
+                <Select onValueChange={(value) => setEditForm(prev => ({ ...prev, tag: value }))} value={editForm.tag}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Select a category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CATEGORIES.map(category => (
+                      <SelectItem key={category.value} value={category.value}>
+                        {category.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <Button type="submit" disabled={loading}>
+                {loading ? 'Updating...' : 'Update Block'}
+              </Button>
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setEditingBlock(null)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

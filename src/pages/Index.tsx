@@ -1,18 +1,158 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Navigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { LogOut, Calendar, Users } from 'lucide-react';
+import { LogOut, Calendar, Users, Settings, Palette, Eye, EyeOff } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 import GroupManager from '@/components/GroupManager';
 import WeeklyCalendar from '@/components/WeeklyCalendar';
-import ScheduleForm from '@/components/ScheduleForm';
+
+// User color system
+const USER_COLORS_KEY = 'meanwhile_user_colors';
+
+interface UserColors {
+  [userId: string]: string;
+}
+
+const getUserColors = (): UserColors => {
+  try {
+    const stored = localStorage.getItem(USER_COLORS_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveUserColors = (colors: UserColors) => {
+  localStorage.setItem(USER_COLORS_KEY, JSON.stringify(colors));
+};
+
+const getUserColor = (userId: string): string => {
+  const userColors = getUserColors();
+  return userColors[userId] || '#3b82f6'; // Default blue if no color set
+};
+
+const isColorTaken = (color: string, excludeUserId?: string): boolean => {
+  const userColors = getUserColors();
+  return Object.entries(userColors).some(([userId, userColor]) => 
+    userId !== excludeUserId && userColor.toLowerCase() === color.toLowerCase()
+  );
+};
 
 const Index = () => {
   const { user, signOut, loading } = useAuth();
+  const { toast } = useToast();
   const [selectedGroupId, setSelectedGroupId] = useState<string>();
   const [viewMode, setViewMode] = useState<'busy' | 'free'>('busy');
   const [refreshKey, setRefreshKey] = useState(0);
+  const [visibleUsers, setVisibleUsers] = useState<Set<string>>(new Set());
+  const [groupMembers, setGroupMembers] = useState<Array<{id: string, username: string, firstName?: string, lastName?: string}>>([]);
+  const [userColor, setUserColor] = useState('#3b82f6');
+
+  // Initialize user color
+  useEffect(() => {
+    if (user?.id) {
+      setUserColor(getUserColor(user.id));
+    }
+  }, [user?.id]);
+
+  const updateUserColor = (newColor: string) => {
+    if (!user?.id) return;
+    
+    if (isColorTaken(newColor, user.id)) {
+      toast({
+        title: "Color already taken",
+        description: "Another user is already using this color. Please choose a different one.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const userColors = getUserColors();
+    userColors[user.id] = newColor;
+    saveUserColors(userColors);
+    setUserColor(newColor);
+    
+    toast({
+      title: "Color updated",
+      description: "Your color has been successfully updated!"
+    });
+  };
+
+  // Get group members for user filtering
+  const fetchGroupMembers = async (groupId: string) => {
+    try {
+      const storedMembers = localStorage.getItem('meanwhile_group_members');
+      const storedUsers = localStorage.getItem('meanwhile_users');
+      
+      if (!storedMembers || !storedUsers) return;
+      
+      const allMembers = JSON.parse(storedMembers);
+      const allUsers = JSON.parse(storedUsers);
+      
+      const groupMemberData = allMembers
+        .filter((member: any) => member.group_id === groupId)
+        .map((member: any) => {
+          const userData = allUsers.find((u: any) => u.id === member.user_id);
+          return {
+            id: member.user_id,
+            username: userData?.username || 'Unknown',
+            firstName: userData?.firstName,
+            lastName: userData?.lastName
+          };
+        });
+      
+      setGroupMembers(groupMemberData);
+      // Initially show all users
+      setVisibleUsers(new Set(groupMemberData.map((member: any) => member.id)));
+    } catch (error) {
+      console.error('Error fetching group members:', error);
+    }
+  };
+
+  // Update group members when selectedGroupId changes
+  useEffect(() => {
+    if (selectedGroupId) {
+      fetchGroupMembers(selectedGroupId);
+    } else {
+      setGroupMembers([]);
+      setVisibleUsers(new Set());
+    }
+  }, [selectedGroupId]);
+
+  const toggleUserVisibility = (userId: string) => {
+    setVisibleUsers(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(userId)) {
+        newSet.delete(userId);
+      } else {
+        newSet.add(userId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleAllUsers = () => {
+    if (visibleUsers.size === groupMembers.length) {
+      // Hide all
+      setVisibleUsers(new Set());
+    } else {
+      // Show all
+      setVisibleUsers(new Set(groupMembers.map(member => member.id)));
+    }
+  };
+
+  const getDisplayName = (member: any) => {
+    if (member.firstName && member.lastName) {
+      return `${member.firstName} ${member.lastName.charAt(0)}`;
+    }
+    return member.username;
+  };
 
   if (loading) {
     return (
@@ -47,10 +187,18 @@ const Index = () => {
               </p>
             </div>
           </div>
-          <Button variant="ghost" onClick={signOut}>
-            <LogOut className="h-4 w-4 mr-2" />
-            Sign Out
-          </Button>
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-muted-foreground">
+              Welcome, {user.username}!
+            </span>
+            <Button 
+              onClick={signOut}
+              variant="outline"
+              className="font-body"
+            >
+              Log Out
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -63,11 +211,113 @@ const Index = () => {
               selectedGroupId={selectedGroupId}
             />
             
-            {selectedGroupId && (
-              <ScheduleForm 
-                groupId={selectedGroupId}
-                onScheduleAdded={handleScheduleAdded}
-              />
+            {/* User Filter for Who's Busy mode */}
+            {selectedGroupId && viewMode === 'busy' && groupMembers.length > 0 && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Eye className="h-4 w-4" />
+                      Show/Hide Users
+                    </CardTitle>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={toggleAllUsers}
+                      className="text-xs"
+                    >
+                      {visibleUsers.size === groupMembers.length ? (
+                        <>
+                          <EyeOff className="h-3 w-3 mr-1" />
+                          Hide All
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="h-3 w-3 mr-1" />
+                          Show All
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <CardDescription>
+                    Toggle visibility of individual users' schedules
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-1 gap-3">
+                    {groupMembers.map((member) => (
+                      <div key={member.id} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`user-${member.id}`}
+                          checked={visibleUsers.has(member.id)}
+                          onCheckedChange={() => toggleUserVisibility(member.id)}
+                        />
+                        <Label
+                          htmlFor={`user-${member.id}`}
+                          className="text-sm font-medium cursor-pointer flex items-center gap-2"
+                        >
+                          <div 
+                            className="w-3 h-3 rounded-full" 
+                            style={{ 
+                              backgroundColor: member.id === user?.id ? '#3b82f6' : '#64748b',
+                              opacity: visibleUsers.has(member.id) ? 1 : 0.3
+                            }}
+                          />
+                          <span className={visibleUsers.has(member.id) ? '' : 'text-muted-foreground'}>
+                            {getDisplayName(member)}
+                            {member.id === user?.id && ' (You)'}
+                          </span>
+                        </Label>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 pt-3 border-t text-xs text-muted-foreground">
+                    Showing {visibleUsers.size} of {groupMembers.length} users
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            
+            {/* User Color Settings */}
+            {user && (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Palette className="h-4 w-4" />
+                    Your Color
+                  </CardTitle>
+                  <CardDescription>
+                    Choose a unique color for all your events
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex gap-3 items-center">
+                    <div 
+                      className="w-12 h-12 rounded-lg border-2 border-gray-200 cursor-pointer relative overflow-hidden shadow-sm"
+                      title="Click to change your color"
+                    >
+                      <input
+                        type="color"
+                        value={userColor}
+                        onChange={(e) => updateUserColor(e.target.value)}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                      />
+                      <div 
+                        className="w-full h-full rounded-lg"
+                        style={{ backgroundColor: userColor }}
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-900">
+                        {userColor.toUpperCase()}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Each user must have a unique color
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             )}
           </div>
 
@@ -84,21 +334,21 @@ const Index = () => {
                   <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'busy' | 'free')}>
                     <TabsList>
                       <TabsTrigger value="busy">Who's Busy</TabsTrigger>
-                      <TabsTrigger value="free">When Are We Free</TabsTrigger>
+                      <TabsTrigger value="free">Who's Free</TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>
 
                 {/* Calendar */}
-                <div className="bg-card rounded-lg border">
+                <div className="bg-white rounded-lg border shadow-sm">
                   <div className="p-4 border-b">
-                    <h3 className="font-medium">
-                      {viewMode === 'busy' ? 'Everyone\'s Schedule' : 'Free Time Overlap'}
+                    <h3 className="font-medium text-base font-body">
+                      {viewMode === 'busy' ? "Everyone's Schedule" : "Free Time Overlap"}
                     </h3>
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground mt-1">
                       {viewMode === 'busy' 
-                        ? 'See what everyone has scheduled throughout the week'
-                        : 'Green areas show when most people are free'
+                        ? 'View when group members are busy' 
+                        : 'Find common free time slots'
                       }
                     </p>
                   </div>
@@ -107,6 +357,7 @@ const Index = () => {
                       key={`${selectedGroupId}-${refreshKey}`}
                       groupId={selectedGroupId} 
                       viewMode={viewMode}
+                      visibleUsers={viewMode === 'busy' ? visibleUsers : undefined}
                     />
                   </div>
                 </div>

@@ -1,90 +1,151 @@
 import { useState, useEffect, useContext, createContext } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+
+interface User {
+  id: string;
+  username: string;
+  firstName: string;
+  lastName: string;
+}
 
 interface AuthContextType {
   user: User | null;
-  session: Session | null;
   loading: boolean;
-  signUp: (email: string, password: string, username: string) => Promise<{ error: any }>;
-  signIn: (email: string, password: string) => Promise<{ error: any }>;
+  signUp: (username: string, password: string, firstName: string, lastName: string) => Promise<{ error: string | null }>;
+  signIn: (username: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Simple localStorage-based user management
+const USERS_KEY = 'meanwhile_users';
+const CURRENT_USER_KEY = 'meanwhile_current_user';
+
+interface StoredUser {
+  id: string;
+  username: string;
+  password: string; // In a real app, this would be hashed
+  firstName: string;
+  lastName: string;
+}
+
+const getStoredUsers = (): StoredUser[] => {
+  try {
+    const stored = localStorage.getItem(USERS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveStoredUsers = (users: StoredUser[]) => {
+  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+};
+
+const getCurrentUser = (): User | null => {
+  try {
+    const stored = localStorage.getItem(CURRENT_USER_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
+};
+
+const setCurrentUser = (user: User | null) => {
+  if (user) {
+    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+  } else {
+    localStorage.removeItem(CURRENT_USER_KEY);
+  }
+};
+
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Set up auth state listener first
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-
-        // Create profile when user signs up
-        if (event === 'SIGNED_IN' && session?.user) {
-          setTimeout(async () => {
-            const { error } = await supabase
-              .from('profiles')
-              .insert([
-                {
-                  user_id: session.user.id,
-                  username: session.user.user_metadata?.username || session.user.email?.split('@')[0]
-                }
-              ]);
-            if (error) console.error('Error creating profile:', error);
-          }, 0);
-        }
-      }
-    );
-
-    // Then check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    // Check for existing session on app load
+    const currentUser = getCurrentUser();
+    setUser(currentUser);
+    setLoading(false);
   }, []);
 
-  const signUp = async (email: string, password: string, username: string) => {
-    const redirectUrl = `${window.location.origin}/`;
+  const signUp = async (username: string, password: string, firstName: string, lastName: string) => {
+    const users = getStoredUsers();
     
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl,
-        data: {
-          username
-        }
-      }
-    });
-    return { error };
+    // Check if username already exists
+    if (users.find(u => u.username.toLowerCase() === username.toLowerCase())) {
+      return { error: 'Username already exists' };
+    }
+
+    // Validate inputs
+    if (username.length < 3) {
+      return { error: 'Username must be at least 3 characters long' };
+    }
+    
+    if (password.length < 4) {
+      return { error: 'Password must be at least 4 characters long' };
+    }
+
+    // Create new user
+    const newUser: StoredUser = {
+      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      username: username.trim(),
+      password: password, // In a real app, hash this!
+      firstName: firstName.trim(),
+      lastName: lastName.trim()
+    };
+
+    users.push(newUser);
+    saveStoredUsers(users);
+
+    // Auto sign in the new user
+    const userSession: User = {
+      id: newUser.id,
+      username: newUser.username,
+      firstName: newUser.firstName,
+      lastName: newUser.lastName
+    };
+    
+    setCurrentUser(userSession);
+    setUser(userSession);
+
+    return { error: null };
   };
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
-    return { error };
+  const signIn = async (username: string, password: string) => {
+    const users = getStoredUsers();
+    
+    const foundUser = users.find(u => 
+      u.username.toLowerCase() === username.toLowerCase() && 
+      u.password === password
+    );
+
+    if (!foundUser) {
+      return { error: 'Invalid username or password' };
+    }
+
+    const userSession: User = {
+      id: foundUser.id,
+      username: foundUser.username,
+      firstName: foundUser.firstName,
+      lastName: foundUser.lastName
+    };
+    
+    setCurrentUser(userSession);
+    setUser(userSession);
+
+    return { error: null };
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    setCurrentUser(null);
+    setUser(null);
   };
 
   return (
     <AuthContext.Provider value={{
       user,
-      session,
       loading,
       signUp,
       signIn,

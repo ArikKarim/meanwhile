@@ -5,10 +5,10 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/integrations/supabase/client';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
-import { Users, Copy, LogOut } from 'lucide-react';
+import { Users, Copy, Trash2, Crown, User } from 'lucide-react';
 
 interface Group {
   id: string;
@@ -22,6 +22,87 @@ interface GroupManagerProps {
   onGroupSelect: (groupId: string) => void;
   selectedGroupId?: string;
 }
+
+// Simple localStorage-based group management
+const GROUPS_KEY = 'meanwhile_groups';
+const GROUP_MEMBERS_KEY = 'meanwhile_group_members';
+const TIME_BLOCKS_KEY = 'meanwhile_time_blocks';
+
+interface StoredGroup {
+  id: string;
+  name: string;
+  code: string;
+  created_by: string;
+  created_at: string;
+}
+
+interface GroupMember {
+  id: string;
+  group_id: string;
+  user_id: string;
+  joined_at: string;
+}
+
+interface TimeBlock {
+  id: string;
+  user_id: string;
+  group_id: string;
+  label: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  color: string;
+  tag: string;
+  created_at: string;
+}
+
+const getStoredGroups = (): StoredGroup[] => {
+  try {
+    const stored = localStorage.getItem(GROUPS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveStoredGroups = (groups: StoredGroup[]) => {
+  localStorage.setItem(GROUPS_KEY, JSON.stringify(groups));
+};
+
+const getGroupMembers = (): GroupMember[] => {
+  try {
+    const stored = localStorage.getItem(GROUP_MEMBERS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveGroupMembers = (members: GroupMember[]) => {
+  localStorage.setItem(GROUP_MEMBERS_KEY, JSON.stringify(members));
+};
+
+const getTimeBlocks = (): TimeBlock[] => {
+  try {
+    const stored = localStorage.getItem(TIME_BLOCKS_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveTimeBlocks = (timeBlocks: TimeBlock[]) => {
+  localStorage.setItem(TIME_BLOCKS_KEY, JSON.stringify(timeBlocks));
+};
+
+const generateGroupCode = (): string => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+};
 
 const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => {
   const { user } = useAuth();
@@ -42,33 +123,30 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('groups')
-        .select(`
-          *,
-          group_members!inner(user_id)
-        `)
-        .eq('group_members.user_id', user.id);
-
-      if (error) throw error;
-
-      // Get member counts
-      const groupsWithCounts = await Promise.all(
-        (data || []).map(async (group) => {
-          const { count } = await supabase
-            .from('group_members')
-            .select('*', { count: 'exact', head: true })
-            .eq('group_id', group.id);
-          
-          return { ...group, member_count: count || 0 };
-        })
-      );
+      const allGroups = getStoredGroups();
+      const allMembers = getGroupMembers();
+      
+      // Get groups where user is a member
+      const userMemberGroups = allMembers
+        .filter(member => member.user_id === user.id)
+        .map(member => member.group_id);
+      
+      const userGroups = allGroups.filter(group => userMemberGroups.includes(group.id));
+      
+      // Add member counts
+      const groupsWithCounts = userGroups.map(group => ({
+        ...group,
+        member_count: allMembers.filter(member => member.group_id === group.id).length
+      }));
 
       setGroups(groupsWithCounts);
       
-      // Auto-select first group if none selected
-      if (groupsWithCounts.length > 0 && !selectedGroupId) {
+      // Auto-select first group if none selected and current selection is invalid
+      if (groupsWithCounts.length > 0 && (!selectedGroupId || !groupsWithCounts.find(g => g.id === selectedGroupId))) {
         onGroupSelect(groupsWithCounts[0].id);
+      } else if (groupsWithCounts.length === 0) {
+        // If no groups left, clear selection
+        onGroupSelect('');
       }
     } catch (error: any) {
       toast({
@@ -90,46 +168,39 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
     const name = formData.get('groupName') as string;
 
     try {
+      const allGroups = getStoredGroups();
+      
       // Generate unique code
       let code = '';
       let isUnique = false;
       while (!isUnique) {
-        const { data: codeData, error: codeError } = await supabase
-          .rpc('generate_group_code');
-        
-        if (codeError) throw codeError;
-        code = codeData;
-
-        const { count } = await supabase
-          .from('groups')
-          .select('*', { count: 'exact', head: true })
-          .eq('code', code);
-        
-        isUnique = count === 0;
+        code = generateGroupCode();
+        isUnique = !allGroups.find(g => g.code === code);
       }
 
       // Create group
-      const { data: group, error: groupError } = await supabase
-        .from('groups')
-        .insert([{
-          name,
-          code,
-          created_by: user.id
-        }])
-        .select()
-        .single();
+      const newGroup: StoredGroup = {
+        id: `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        name: name.trim(),
+        code,
+        created_by: user.id,
+        created_at: new Date().toISOString()
+      };
 
-      if (groupError) throw groupError;
+      allGroups.push(newGroup);
+      saveStoredGroups(allGroups);
 
       // Add creator as member
-      const { error: memberError } = await supabase
-        .from('group_members')
-        .insert([{
-          group_id: group.id,
-          user_id: user.id
-        }]);
+      const allMembers = getGroupMembers();
+      const newMember: GroupMember = {
+        id: `member_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        group_id: newGroup.id,
+        user_id: user.id,
+        joined_at: new Date().toISOString()
+      };
 
-      if (memberError) throw memberError;
+      allMembers.push(newMember);
+      saveGroupMembers(allMembers);
 
       toast({
         title: "Group created!",
@@ -158,51 +229,37 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
     const code = formData.get('groupCode') as string;
 
     try {
-      // Find group by code
-      const { data: group, error: groupError } = await supabase
-        .from('groups')
-        .select('*')
-        .eq('code', code.toUpperCase())
-        .single();
+      const allGroups = getStoredGroups();
+      const group = allGroups.find(g => g.code.toUpperCase() === code.toUpperCase());
 
-      if (groupError) {
-        toast({
-          title: "Group not found",
-          description: "Please check the code and try again.",
-          variant: "destructive",
-        });
-        return;
+      if (!group) {
+        throw new Error('Group not found. Please check the code and try again.');
       }
 
-      // Check if already a member
-      const { count } = await supabase
-        .from('group_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('group_id', group.id)
-        .eq('user_id', user.id);
+      // Check if user is already a member
+      const allMembers = getGroupMembers();
+      const existingMember = allMembers.find(m => 
+        m.group_id === group.id && m.user_id === user.id
+      );
 
-      if (count && count > 0) {
-        toast({
-          title: "Already a member",
-          description: "You're already part of this group.",
-          variant: "destructive",
-        });
-        return;
+      if (existingMember) {
+        throw new Error('You are already a member of this group.');
       }
 
-      // Join group
-      const { error: memberError } = await supabase
-        .from('group_members')
-        .insert([{
-          group_id: group.id,
-          user_id: user.id
-        }]);
+      // Add user as member
+      const newMember: GroupMember = {
+        id: `member_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        group_id: group.id,
+        user_id: user.id,
+        joined_at: new Date().toISOString()
+      };
 
-      if (memberError) throw memberError;
+      allMembers.push(newMember);
+      saveGroupMembers(allMembers);
 
       toast({
         title: "Joined group!",
-        description: `Welcome to "${group.name}".`,
+        description: `You've successfully joined "${group.name}".`,
       });
 
       (e.target as HTMLFormElement).reset();
@@ -218,103 +275,134 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
     }
   };
 
-  const copyGroupCode = (code: string) => {
-    navigator.clipboard.writeText(code);
-    toast({
-      title: "Code copied!",
-      description: "Share this code with friends to invite them.",
-    });
-  };
-
-  const leaveGroup = async (groupId: string) => {
+  const deleteGroup = async (groupId: string, groupName: string) => {
     if (!user) return;
 
     try {
-      const { error } = await supabase
-        .from('group_members')
-        .delete()
-        .eq('group_id', groupId)
-        .eq('user_id', user.id);
+      // Get current data
+      const allGroups = getStoredGroups();
+      const allMembers = getGroupMembers();
+      const allTimeBlocks = getTimeBlocks();
 
-      if (error) throw error;
+      // Find the group to check if user is the creator
+      const group = allGroups.find(g => g.id === groupId);
+      if (!group) {
+        throw new Error('Group not found.');
+      }
+
+      // Only allow creator to delete the group
+      if (group.created_by !== user.id) {
+        throw new Error('Only the group creator can delete this group.');
+      }
+
+      // Remove the group
+      const updatedGroups = allGroups.filter(g => g.id !== groupId);
+      saveStoredGroups(updatedGroups);
+
+      // Remove all members from the group
+      const updatedMembers = allMembers.filter(m => m.group_id !== groupId);
+      saveGroupMembers(updatedMembers);
+
+      // Remove all time blocks for this group
+      const updatedTimeBlocks = allTimeBlocks.filter(tb => tb.group_id !== groupId);
+      saveTimeBlocks(updatedTimeBlocks);
 
       toast({
-        title: "Left group",
-        description: "You have left the group.",
+        title: "Group deleted",
+        description: `"${groupName}" and all its data have been deleted.`,
       });
 
       fetchGroups();
-      
-      if (selectedGroupId === groupId) {
-        const remainingGroups = groups.filter(g => g.id !== groupId);
-        if (remainingGroups.length > 0) {
-          onGroupSelect(remainingGroups[0].id);
-        }
-      }
     } catch (error: any) {
       toast({
-        title: "Error leaving group",
+        title: "Error deleting group",
         description: error.message,
         variant: "destructive",
       });
     }
   };
 
+  const copyGroupCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    toast({
+      title: "Code copied!",
+      description: "Group code copied to clipboard.",
+    });
+  };
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Groups
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-4">
+            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"></div>
+            <p className="mt-2 text-sm text-muted-foreground">Loading groups...</p>
+          </div>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Groups & Teams</CardTitle>
-          <CardDescription>
-            Create or join groups to share schedules with friends
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Tabs defaultValue="my-groups" className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="my-groups">My Groups</TabsTrigger>
-              <TabsTrigger value="create">Create</TabsTrigger>
-              <TabsTrigger value="join">Join</TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="my-groups" className="space-y-4">
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Users className="h-5 w-5" />
+          Groups
+        </CardTitle>
+        <CardDescription>
+          Create a new group or join an existing one
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Tabs defaultValue="groups" className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="groups">My Groups</TabsTrigger>
+            <TabsTrigger value="create">Create</TabsTrigger>
+            <TabsTrigger value="join">Join</TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="groups" className="mt-4">
+            <div className="space-y-2">
               {groups.length === 0 ? (
-                <p className="text-muted-foreground text-center py-8">
+                <p className="text-center text-muted-foreground py-4">
                   No groups yet. Create or join one to get started!
                 </p>
               ) : (
-                groups.map(group => (
+                groups.map((group) => (
                   <div
                     key={group.id}
-                    className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                      selectedGroupId === group.id 
-                        ? 'border-primary bg-primary/5' 
-                        : 'border-border hover:border-primary/50'
+                    className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                      selectedGroupId === group.id
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:bg-muted/50'
                     }`}
                     onClick={() => onGroupSelect(group.id)}
                   >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="font-medium">{group.name}</h3>
-                        <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-semibold font-body text-base truncate">{group.name}</h4>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
                           <Badge variant="outline" className="text-xs">
                             {group.code}
                           </Badge>
-                          <span className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Users className="h-3 w-3" />
+                          <span className="text-xs text-muted-foreground">
                             {group.member_count} member{group.member_count !== 1 ? 's' : ''}
                           </span>
+                          {group.created_by === user?.id ? (
+                            <Crown className="h-4 w-4 text-yellow-600" />
+                          ) : (
+                            <User className="h-4 w-4 text-blue-600" />
+                          )}
                         </div>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex items-center gap-1 ml-2 flex-shrink-0">
                         <Button
                           variant="ghost"
                           size="sm"
@@ -322,65 +410,87 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
                             e.stopPropagation();
                             copyGroupCode(group.code);
                           }}
+                          className="h-8 w-8 p-0"
                         >
-                          <Copy className="h-4 w-4" />
+                          <Copy className="h-3 w-3" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            leaveGroup(group.id);
-                          }}
-                        >
-                          <LogOut className="h-4 w-4" />
-                        </Button>
+                        {group.created_by === user?.id && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-destructive hover:text-destructive h-8 w-8 p-0"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete Group</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Are you sure you want to delete "{group.name}"? This will permanently delete the group, remove all members, and delete all schedules. This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => deleteGroup(group.id, group.name)}
+                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                >
+                                  Delete Group
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
                       </div>
                     </div>
                   </div>
                 ))
               )}
-            </TabsContent>
-            
-            <TabsContent value="create">
-              <form onSubmit={createGroup} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="groupName">Group Name</Label>
-                  <Input
-                    id="groupName"
-                    name="groupName"
-                    placeholder="e.g., Roommates Fall 2025"
-                    required
-                  />
-                </div>
-                <Button type="submit" className="w-full" disabled={createLoading}>
-                  {createLoading ? 'Creating...' : 'Create Group'}
-                </Button>
-              </form>
-            </TabsContent>
-            
-            <TabsContent value="join">
-              <form onSubmit={joinGroup} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="groupCode">Group Code</Label>
-                  <Input
-                    id="groupCode"
-                    name="groupCode"
-                    placeholder="Enter 6-character code"
-                    maxLength={6}
-                    style={{ textTransform: 'uppercase' }}
-                    required
-                  />
-                </div>
-                <Button type="submit" className="w-full" disabled={joinLoading}>
-                  {joinLoading ? 'Joining...' : 'Join Group'}
-                </Button>
-              </form>
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
-    </div>
+            </div>
+          </TabsContent>
+          
+          <TabsContent value="create" className="mt-4">
+            <form onSubmit={createGroup} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="groupName">Group Name</Label>
+                <Input
+                  id="groupName"
+                  name="groupName"
+                  placeholder="e.g., Study Group, Friend Circle"
+                  required
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={createLoading}>
+                {createLoading ? 'Creating...' : 'Create Group'}
+              </Button>
+            </form>
+          </TabsContent>
+          
+          <TabsContent value="join" className="mt-4">
+            <form onSubmit={joinGroup} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="groupCode">Group Code</Label>
+                <Input
+                  id="groupCode"
+                  name="groupCode"
+                  placeholder="Enter 6-character code"
+                  maxLength={6}
+                  style={{ textTransform: 'uppercase' }}
+                  required
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={joinLoading}>
+                {joinLoading ? 'Joining...' : 'Join Group'}
+              </Button>
+            </form>
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
   );
 };
 
