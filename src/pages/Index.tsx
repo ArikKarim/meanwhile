@@ -7,16 +7,26 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { LogOut, Calendar, Users, Settings, Palette, Eye, EyeOff } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { LogOut, Calendar, Users, Settings, Palette, Eye, EyeOff, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import GroupManager from '@/components/GroupManager';
 import WeeklyCalendar from '@/components/WeeklyCalendar';
 
 // User color system
 const USER_COLORS_KEY = 'meanwhile_user_colors';
+// Calendar settings system
+const CALENDAR_SETTINGS_KEY = 'meanwhile_calendar_settings';
 
 interface UserColors {
   [userId: string]: string;
+}
+
+interface CalendarSettings {
+  [groupId: string]: {
+    startHour: number;
+    endHour: number;
+  };
 }
 
 const getUserColors = (): UserColors => {
@@ -32,6 +42,28 @@ const saveUserColors = (colors: UserColors) => {
   localStorage.setItem(USER_COLORS_KEY, JSON.stringify(colors));
 };
 
+const getCalendarSettings = (): CalendarSettings => {
+  try {
+    const stored = localStorage.getItem(CALENDAR_SETTINGS_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveCalendarSettings = (settings: CalendarSettings) => {
+  localStorage.setItem(CALENDAR_SETTINGS_KEY, JSON.stringify(settings));
+};
+
+const getGroups = () => {
+  try {
+    const stored = localStorage.getItem('meanwhile_groups');
+    return stored ? JSON.parse(stored) : [];
+  } catch {
+    return [];
+  }
+};
+
 const getUserColor = (userId: string): string => {
   const userColors = getUserColors();
   return userColors[userId] || '#3b82f6'; // Default blue if no color set
@@ -44,6 +76,82 @@ const isColorTaken = (color: string, excludeUserId?: string): boolean => {
   );
 };
 
+// Time Range Form Component
+const TimeRangeForm = ({ groupId, currentSettings, onUpdate }: {
+  groupId: string;
+  currentSettings: { startHour: number; endHour: number };
+  onUpdate: (groupId: string, startHour: number, endHour: number) => void;
+}) => {
+  const [startHour, setStartHour] = useState(currentSettings.startHour);
+  const [endHour, setEndHour] = useState(currentSettings.endHour);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (startHour >= endHour) {
+      alert('Start time must be before end time');
+      return;
+    }
+    if (endHour - startHour < 3) {
+      alert('Calendar must span at least 3 hours');
+      return;
+    }
+    onUpdate(groupId, startHour, endHour);
+  };
+
+  const formatTime = (hour: number) => {
+    if (hour === 0) return '12 AM';
+    if (hour < 12) return `${hour} AM`;
+    if (hour === 12) return '12 PM';
+    return `${hour - 12} PM`;
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="start-hour">Start Time</Label>
+          <select
+            id="start-hour"
+            value={startHour}
+            onChange={(e) => setStartHour(Number(e.target.value))}
+            className="w-full p-2 border border-gray-300 rounded-md"
+          >
+            {Array.from({ length: 24 }, (_, i) => (
+              <option key={i} value={i}>
+                {formatTime(i)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="end-hour">End Time</Label>
+          <select
+            id="end-hour"
+            value={endHour}
+            onChange={(e) => setEndHour(Number(e.target.value))}
+            className="w-full p-2 border border-gray-300 rounded-md"
+          >
+            {Array.from({ length: 24 }, (_, i) => (
+              <option key={i} value={i}>
+                {formatTime(i)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="text-sm text-muted-foreground">
+        Current: {formatTime(currentSettings.startHour)} - {formatTime(currentSettings.endHour)}
+      </div>
+      <div className="flex gap-2 pt-4">
+        <Button type="submit">Update Time Range</Button>
+        <Button type="button" variant="outline" onClick={() => {}}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+};
+
 const Index = () => {
   const { user, signOut, loading } = useAuth();
   const { toast } = useToast();
@@ -53,6 +161,8 @@ const Index = () => {
   const [visibleUsers, setVisibleUsers] = useState<Set<string>>(new Set());
   const [groupMembers, setGroupMembers] = useState<Array<{id: string, username: string, firstName?: string, lastName?: string}>>([]);
   const [userColor, setUserColor] = useState('#3b82f6');
+  const [calendarSettings, setCalendarSettings] = useState<CalendarSettings>({});
+  const [showTimeSettings, setShowTimeSettings] = useState(false);
 
   // Initialize user color
   useEffect(() => {
@@ -60,6 +170,39 @@ const Index = () => {
       setUserColor(getUserColor(user.id));
     }
   }, [user?.id]);
+
+  // Load calendar settings
+  useEffect(() => {
+    setCalendarSettings(getCalendarSettings());
+  }, []);
+
+  // Check if current user is group admin (creator)
+  const isGroupAdmin = (groupId: string): boolean => {
+    const groups = getGroups();
+    const group = groups.find(g => g.id === groupId);
+    return group?.created_by === user?.id;
+  };
+
+  // Get calendar time settings for current group
+  const getGroupTimeSettings = (groupId: string) => {
+    return calendarSettings[groupId] || { startHour: 7, endHour: 21 };
+  };
+
+  // Update calendar time settings
+  const updateTimeSettings = (groupId: string, startHour: number, endHour: number) => {
+    const newSettings = {
+      ...calendarSettings,
+      [groupId]: { startHour, endHour }
+    };
+    setCalendarSettings(newSettings);
+    saveCalendarSettings(newSettings);
+    setShowTimeSettings(false);
+    setRefreshKey(prev => prev + 1); // Force calendar refresh
+    toast({
+      title: "Calendar Updated",
+      description: `Calendar time range set to ${startHour < 12 ? startHour : startHour === 12 ? 12 : startHour - 12}${startHour < 12 ? 'AM' : 'PM'} - ${endHour < 12 ? endHour : endHour === 12 ? 12 : endHour - 12}${endHour < 12 ? 'AM' : 'PM'}`,
+    });
+  };
 
   const updateUserColor = (newColor: string) => {
     if (!user?.id) return;
@@ -331,12 +474,37 @@ const Index = () => {
                     <Users className="h-5 w-5" />
                     Group Schedule
                   </h2>
-                  <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'busy' | 'free')}>
-                    <TabsList>
-                      <TabsTrigger value="busy">Who's Busy</TabsTrigger>
-                      <TabsTrigger value="free">Who's Free</TabsTrigger>
-                    </TabsList>
-                  </Tabs>
+                  <div className="flex items-center gap-2">
+                    {selectedGroupId && isGroupAdmin(selectedGroupId) && (
+                      <Dialog open={showTimeSettings} onOpenChange={setShowTimeSettings}>
+                        <DialogTrigger asChild>
+                          <Button variant="outline" size="sm" className="gap-2">
+                            <Clock className="h-4 w-4" />
+                            Time Settings
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="sm:max-w-[425px]">
+                          <DialogHeader>
+                            <DialogTitle>Calendar Time Range</DialogTitle>
+                            <DialogDescription>
+                              Set the calendar time range for all group members.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <TimeRangeForm 
+                            groupId={selectedGroupId}
+                            currentSettings={getGroupTimeSettings(selectedGroupId)}
+                            onUpdate={updateTimeSettings}
+                          />
+                        </DialogContent>
+                      </Dialog>
+                    )}
+                    <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'busy' | 'free')}>
+                      <TabsList>
+                        <TabsTrigger value="busy">Who's Busy</TabsTrigger>
+                        <TabsTrigger value="free">Who's Free</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
                 </div>
 
                 {/* Calendar */}
@@ -358,6 +526,8 @@ const Index = () => {
                       groupId={selectedGroupId} 
                       viewMode={viewMode}
                       visibleUsers={viewMode === 'busy' ? visibleUsers : undefined}
+                      startHour={getGroupTimeSettings(selectedGroupId).startHour}
+                      endHour={getGroupTimeSettings(selectedGroupId).endHour}
                     />
                   </div>
                 </div>

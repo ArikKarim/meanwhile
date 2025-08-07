@@ -47,12 +47,12 @@ const Landing = () => {
             </h1>
           </div>
           <div className="flex items-center gap-4">
-            <Link to="/auth">
+            <Link to="/auth?mode=signin">
               <Button variant="ghost" className="font-medium font-body">
                 Log In
               </Button>
             </Link>
-            <Link to="/auth">
+            <Link to="/auth?mode=signup">
               <Button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium font-body">
                 Get Started <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
@@ -81,7 +81,7 @@ const Landing = () => {
           </p>
           
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Link to="/auth">
+            <Link to="/auth?mode=signup">
               <Button size="lg" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold px-8 py-3 text-lg font-body">
                 Start Scheduling <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
@@ -145,9 +145,9 @@ const Landing = () => {
           <p className="text-xl text-blue-100 mb-10 font-body">
             Join your friends already coordinating schedules better with Meanwhile.
           </p>
-          <Link to="/auth">
+          <Link to="/auth?mode=signup">
             <Button size="lg" className="bg-white text-blue-600 hover:bg-blue-50 font-semibold px-8 py-3 text-lg font-body">
-              Get Started for Free <ArrowRight className="ml-2 h-5 w-5" />
+              Get Started <ArrowRight className="ml-2 h-5 w-5" />
             </Button>
           </Link>
         </div>

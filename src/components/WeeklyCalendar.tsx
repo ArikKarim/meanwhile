@@ -23,10 +23,11 @@ interface WeeklyCalendarProps {
   groupId: string;
   viewMode: 'busy' | 'free';
   visibleUsers?: Set<string>;
+  startHour?: number;
+  endHour?: number;
 }
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const HOURS = Array.from({ length: 15 }, (_, i) => i + 7); // 7 AM to 9 PM
 
 // User color system (replaces category-based colors)
 const USER_COLORS_KEY = 'meanwhile_user_colors';
@@ -171,11 +172,24 @@ const getDisplayName = (user: StoredUser | undefined): string => {
   return user.username;
 };
 
-const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps) => {
+const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHour = 21 }: WeeklyCalendarProps) => {
+  // Generate dynamic time slots based on customizable range
+  const TIME_SLOTS = Array.from({ length: (endHour - startHour) * 2 }, (_, i) => {
+    const hour = Math.floor(i / 2) + startHour;
+    const minute = (i % 2) * 30;
+    return { hour, minute, time: `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}` };
+  });
+
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingBlock, setEditingBlock] = useState<TimeBlock | null>(null);
   const [editForm, setEditForm] = useState({
+    label: '',
+    start_time: '',
+    end_time: '',
+    tag: 'class'
+  });
+  const [originalEditForm, setOriginalEditForm] = useState({
     label: '',
     start_time: '',
     end_time: '',
@@ -211,12 +225,14 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
 
   const handleEditBlock = (block: TimeBlock) => {
     setEditingBlock(block);
-    setEditForm({
+    const formData = {
       label: block.label,
       start_time: block.start_time,
       end_time: block.end_time,
       tag: block.tag
-    });
+    };
+    setEditForm(formData);
+    setOriginalEditForm(formData); // Store original values for comparison
   };
 
   const handleUpdateBlock = async () => {
@@ -267,24 +283,13 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
   };
 
-  const handleDoubleClick = (dayIndex: number, hour: number, event: React.MouseEvent) => {
+  const handleTimeSlotClick = (dayIndex: number, timeSlot: { hour: number; minute: number; time: string }, event: React.MouseEvent) => {
     if (!user || viewMode !== 'busy') return;
     
-    const rect = event.currentTarget.getBoundingClientRect();
-    const relativeY = event.clientY - rect.top;
-    
-    // Calculate minutes within the clicked hour cell (0-59)
-    const minutesInHour = (relativeY / rect.height) * 60;
-    
-    // Calculate total minutes from midnight using the actual hour value
-    const totalMinutes = hour * 60 + minutesInHour;
-    
-    // Snap to 15-minute increments
-    const snappedMinutes = Math.round(totalMinutes / 15) * 15;
-    
-    const startTime = minutesToTime(Math.min(snappedMinutes, 21 * 60)); // Cap at 9 PM
+    // Use the exact time slot that was clicked
+    const startTime = timeSlot.time;
     const startMinutes = timeToMinutes(startTime);
-    const endTime = minutesToTime(Math.min(startMinutes + 60, 21 * 60)); // Default 1 hour duration, cap at 9 PM
+    const endTime = minutesToTime(Math.min(startMinutes + 60, endHour * 60)); // Default 1 hour duration, cap at end hour
     
     // Create quick event
     const newBlock = {
@@ -308,18 +313,21 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
     fetchTimeBlocks();
     
     // Open edit dialog immediately
-    setEditingBlock({
+    const blockWithDisplay = {
       ...newBlock,
       displayName: user.firstName && user.lastName 
         ? `${user.firstName} ${user.lastName.charAt(0)}`
         : user.username
-    });
-    setEditForm({
+    };
+    setEditingBlock(blockWithDisplay);
+    const formData = {
       label: newBlock.label,
       start_time: newBlock.start_time,
       end_time: newBlock.end_time,
       tag: newBlock.tag
-    });
+    };
+    setEditForm(formData);
+    setOriginalEditForm(formData); // Store original values for new blocks
   };
 
   const handleMouseDown = (blockId: string, dragType: 'top' | 'bottom', event: React.MouseEvent) => {
@@ -342,10 +350,10 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
     if (!dragState.blockId || !dragState.dragType) return;
     
     const deltaY = event.clientY - dragState.startY;
-    const deltaMinutes = Math.round((deltaY / 60) * 60); // 60px = 1 hour
+    const deltaMinutes = Math.round((deltaY / 30) * 30); // 30px = 30 minutes
     
-    // Snap to 15-minute increments
-    const snappedDeltaMinutes = Math.round(deltaMinutes / 15) * 15;
+    // Snap to 30-minute increments (simpler and more predictable)
+    const snappedDeltaMinutes = Math.round(deltaMinutes / 30) * 30;
     
     const block = timeBlocks.find(b => b.id === dragState.blockId);
     if (!block) return;
@@ -354,9 +362,9 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
     let newEnd = timeToMinutes(dragState.originalEnd);
     
     if (dragState.dragType === 'top') {
-      newStart = Math.max(7 * 60, Math.min(newStart + snappedDeltaMinutes, newEnd - 15)); // Min 15 min duration
+      newStart = Math.max(startHour * 60, Math.min(newStart + snappedDeltaMinutes, newEnd - 30)); // Min 30 min duration
     } else {
-      newEnd = Math.min(21 * 60, Math.max(newEnd + snappedDeltaMinutes, newStart + 15)); // Min 15 min duration
+      newEnd = Math.min(endHour * 60, Math.max(newEnd + snappedDeltaMinutes, newStart + 30)); // Min 30 min duration
     }
     
     // Update the time block temporarily (visual feedback)
@@ -503,14 +511,14 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
   };
 
   const getBlockPosition = (startTime: string, endTime: string) => {
-    const [startHour, startMin] = startTime.split(':').map(Number);
-    const [endHour, endMin] = endTime.split(':').map(Number);
+    const [startHourNum, startMin] = startTime.split(':').map(Number);
+    const [endHourNum, endMin] = endTime.split(':').map(Number);
     
-    const startMinutes = (startHour - 7) * 60 + startMin;
-    const endMinutes = (endHour - 7) * 60 + endMin;
+    const startMinutes = (startHourNum - startHour) * 60 + startMin;
+    const endMinutes = (endHourNum - startHour) * 60 + endMin;
     
-    const top = (startMinutes / 60) * 60; // 60px per hour
-    const height = ((endMinutes - startMinutes) / 60) * 60;
+    const top = (startMinutes / 30) * 30; // 30px per 30-minute slot
+    const height = ((endMinutes - startMinutes) / 30) * 30; // 30px per 30-minute slot
     
     return { top, height };
   };
@@ -526,11 +534,11 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
       
       // Mark occupied 30-minute slots
       dayBlocks.forEach(block => {
-        const [startHour, startMin] = block.start_time.split(':').map(Number);
-        const [endHour, endMin] = block.end_time.split(':').map(Number);
+        const [blockStartHour, startMin] = block.start_time.split(':').map(Number);
+        const [blockEndHour, endMin] = block.end_time.split(':').map(Number);
         
-        const startSlot = (startHour - 7) * 2 + Math.floor(startMin / 30);
-        const endSlot = (endHour - 7) * 2 + Math.floor(endMin / 30);
+        const startSlot = (blockStartHour - startHour) * 2 + Math.floor(startMin / 30);
+        const endSlot = (blockEndHour - startHour) * 2 + Math.floor(endMin / 30);
         
         for (let slot = startSlot; slot < endSlot; slot++) {
           occupiedSlots.add(slot);
@@ -539,20 +547,21 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
       
       // Find free time blocks (consecutive free slots)
       let freeStart = null;
-      for (let slot = 0; slot < 30; slot++) { // 15 hours * 2 slots per hour
+      const totalSlots = (endHour - startHour) * 2; // Dynamic slot count
+      for (let slot = 0; slot < totalSlots; slot++) {
         if (!occupiedSlots.has(slot)) {
           if (freeStart === null) freeStart = slot;
         } else {
           if (freeStart !== null) {
-            const startHour = 7 + Math.floor(freeStart / 2);
-            const startMin = (freeStart % 2) * 30;
-            const endHour = 7 + Math.floor(slot / 2);
-            const endMin = (slot % 2) * 30;
+            const freeStartHour = startHour + Math.floor(freeStart / 2);
+            const freeStartMin = (freeStart % 2) * 30;
+            const freeEndHour = startHour + Math.floor(slot / 2);
+            const freeEndMin = (slot % 2) * 30;
             
             freeBlocks.push({
               day: dayIndex,
-              start: startHour * 60 + startMin,
-              end: endHour * 60 + endMin,
+              start: freeStartHour * 60 + freeStartMin,
+              end: freeEndHour * 60 + freeEndMin,
               overlap: 1
             });
             freeStart = null;
@@ -562,12 +571,12 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
       
       // Handle case where free time extends to end of day
       if (freeStart !== null) {
-        const startHour = 7 + Math.floor(freeStart / 2);
-        const startMin = (freeStart % 2) * 30;
+        const freeStartHour = startHour + Math.floor(freeStart / 2);
+        const freeStartMin = (freeStart % 2) * 30;
         freeBlocks.push({
           day: dayIndex,
-          start: startHour * 60 + startMin,
-          end: 22 * 60, // 10 PM
+          start: freeStartHour * 60 + freeStartMin,
+          end: endHour * 60, // End at custom end hour
           overlap: 1
         });
       }
@@ -616,8 +625,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
         })()}
 
         {/* Header */}
-        <div className="grid grid-cols-8 gap-1 mb-2">
-          <div className="text-center text-sm font-medium text-muted-foreground p-2">
+        <div className="grid gap-0 mb-2" style={{ gridTemplateColumns: 'auto 1fr 1fr 1fr 1fr 1fr 1fr 1fr' }}>
+          <div className="text-center text-sm font-medium text-muted-foreground p-2 w-16">
             Time
           </div>
           {DAYS.map((day, index) => (
@@ -628,28 +637,40 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
         </div>
 
         {/* Calendar Grid */}
-        <div className="grid grid-cols-8 gap-1">
+        <div className="grid gap-0 border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm" style={{ gridTemplateColumns: 'auto 1fr 1fr 1fr 1fr 1fr 1fr 1fr' }}>
           {/* Time Column */}
-          <div className="space-y-0">
-            {HOURS.map((hour) => (
-              <div key={hour} className="h-[60px] text-xs text-muted-foreground border-r flex items-center justify-end pr-3 bg-slate-50/50">
-                <div className="text-right font-medium">
-                  {hour}:00
-                </div>
+          <div className="bg-slate-50/50 border-r border-slate-200 w-16">
+            {TIME_SLOTS.map((timeSlot, index) => (
+              <div key={timeSlot.time} className={`h-[30px] text-xs text-slate-600 flex items-center justify-end pr-2 ${
+                timeSlot.minute === 0 ? 'border-t border-slate-300 font-medium' : 'border-t border-slate-100'
+              }`}>
+                {timeSlot.minute === 0 && (
+                  <div className="text-right text-xs leading-none">
+                    {timeSlot.hour > 12 ? timeSlot.hour - 12 : timeSlot.hour === 0 ? 12 : timeSlot.hour}
+                    <span className="text-xs opacity-70">
+                      {timeSlot.hour >= 12 ? 'PM' : 'AM'}
+                    </span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
 
           {/* Day Columns */}
           {DAYS.map((day, dayIndex) => (
-            <div key={day} className="relative">
-              {/* Hour Grid Lines */}
-              {HOURS.map((hour) => (
+            <div key={day} className="relative border-r border-slate-200 last:border-r-0">
+              {/* Time Slot Grid */}
+              {TIME_SLOTS.map((timeSlot, index) => (
                 <div 
-                  key={hour} 
-                  className="h-[60px] border border-muted/20 hover:bg-blue-50/30 transition-colors cursor-pointer"
-                  onDoubleClick={(e) => handleDoubleClick(dayIndex, hour, e)}
-                ></div>
+                  key={timeSlot.time} 
+                  className={`h-[30px] border-t border-slate-100 hover:bg-blue-50/40 transition-colors cursor-pointer group ${
+                    timeSlot.minute === 0 ? 'border-t-slate-200' : ''
+                  }`}
+                  onClick={(e) => handleTimeSlotClick(dayIndex, timeSlot, e)}
+                  title={`Click to create event at ${timeSlot.time}`}
+                >
+                  <div className="w-full h-full opacity-0 group-hover:opacity-100 transition-opacity bg-blue-100/30 rounded-sm m-0.5" />
+                </div>
               ))}
 
               {/* Time Blocks for Busy Mode */}
@@ -670,19 +691,21 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
               return (
                 <div
                     key={block.id}
-                    className={`absolute rounded text-xs text-white p-1 overflow-hidden group ${borderStyle} ${
-                      isDragging ? 'opacity-80 shadow-lg z-50' : ''
-                    } ${isOwnBlock ? 'hover:shadow-md transition-shadow' : ''}`}
+                    className={`absolute rounded-lg text-xs text-white overflow-hidden group shadow-sm ${borderStyle} ${
+                      isDragging ? 'opacity-80 shadow-lg z-50' : 'shadow-sm'
+                    } ${isOwnBlock ? 'hover:shadow-md transition-all duration-200' : ''}`}
                     style={{
-                      top: `${top}px`,
-                      height: `${height}px`,
+                      top: `${top + 2}px`,
+                      height: `${Math.max(height - 4, 26)}px`,
                       left: leftPosition,
                       width: blockWidth,
                       backgroundColor: block.color,
-                      minHeight: '20px',
-                      marginLeft: block.totalColumns > 1 ? '1px' : '4px',
-                      marginRight: block.totalColumns > 1 ? '1px' : '4px',
-                      cursor: isOwnBlock ? 'pointer' : 'default'
+                      minHeight: '26px',
+                      marginLeft: block.totalColumns > 1 ? '2px' : '4px',
+                      marginRight: block.totalColumns > 1 ? '2px' : '4px',
+                      cursor: isOwnBlock ? 'pointer' : 'default',
+                      border: `1px solid ${block.color}dd`,
+                      padding: Math.max(height - 4, 26) < 50 ? '2px 4px' : '4px 6px' // Responsive padding
                     }}
                     onClick={() => isOwnBlock && handleEditBlock(block)}
                   >
@@ -695,12 +718,20 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
                       />
                     )}
                     
-                    <div className="font-medium truncate">{block.label}</div>
-                    <div className="text-xs opacity-90">
-                      {formatTime(block.start_time)} - {formatTime(block.end_time)}
-                    </div>
-                    {block.displayName && (
-                      <div className="text-xs opacity-75">{block.displayName}</div>
+                    {Math.max(height - 4, 26) >= 50 ? (
+                      // Full content for larger blocks
+                      <>
+                        <div className="font-medium truncate">{block.label}</div>
+                        <div className="text-xs opacity-90">
+                          {formatTime(block.start_time)} - {formatTime(block.end_time)}
+                        </div>
+                        {block.displayName && (
+                          <div className="text-xs opacity-75">{block.displayName}</div>
+                        )}
+                      </>
+                    ) : (
+                      // Compact content for smaller blocks
+                      <div className="font-medium truncate text-xs leading-tight">{block.label}</div>
                     )}
                     
                     {/* Drag handle - bottom */}
@@ -756,8 +787,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
               {viewMode === 'free' && freeTimeBlocks
                 .filter(block => block.day === dayIndex)
                 .map((block, index) => {
-                  const top = ((block.start - 7 * 60) / 60) * 60;
-                  const height = ((block.end - block.start) / 60) * 60;
+                  const top = ((block.start - startHour * 60) / 30) * 30;
+                  const height = ((block.end - block.start) / 30) * 30;
                   
                   return (
                     <div
@@ -781,7 +812,19 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
       </div>
 
       {/* Edit Time Block Dialog */}
-      <Dialog open={!!editingBlock} onOpenChange={(open) => !open && setEditingBlock(null)}>
+      <Dialog open={!!editingBlock} onOpenChange={(open) => {
+        if (!open) {
+          // Check if this is a new block with no changes and delete it
+          if (editingBlock && editingBlock.label === 'New Event' && 
+              editForm.label === originalEditForm.label &&
+              editForm.start_time === originalEditForm.start_time &&
+              editForm.end_time === originalEditForm.end_time &&
+              editForm.tag === originalEditForm.tag) {
+            handleDeleteBlock(editingBlock.id);
+          }
+          setEditingBlock(null);
+        }
+      }}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
             <DialogTitle>Edit Activity</DialogTitle>
@@ -836,16 +879,18 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers }: WeeklyCalendarProps
                 </Select>
               </div>
               
-              <Button type="submit" disabled={loading}>
-                {loading ? 'Updating...' : 'Update Block'}
-              </Button>
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={() => setEditingBlock(null)}
-              >
-                Cancel
-              </Button>
+              <div className="flex gap-2 pt-4">
+                <Button type="button" onClick={handleUpdateBlock} disabled={loading}>
+                  {loading ? 'Updating...' : 'Update Block'}
+                </Button>
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => setEditingBlock(null)}
+                >
+                  Cancel
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>
