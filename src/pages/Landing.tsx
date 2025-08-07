@@ -6,6 +6,7 @@ import { Calendar, Users, Clock, ArrowRight, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const Landing = () => {
+  // Exactly 3 FAQ questions - forced refresh
   const faqs = [
     {
       question: "How do I create a group?",
@@ -14,26 +15,6 @@ const Landing = () => {
     {
       question: "How do friends join my group?",
       answer: "Share your group code with friends. They can sign up and enter the code in the 'Join' tab to instantly join your group."
-    },
-    {
-      question: "Can I see when everyone is free?",
-      answer: "Yes! Use the 'When Are We Free' view mode to see green blocks showing times when most people are available."
-    },
-    {
-      question: "Is my data secure?",
-      answer: "Your data is stored locally in your browser and shared only with group members you invite. No personal information is collected."
-    },
-    {
-      question: "How many people can join a group?",
-      answer: "There's no limit! Invite as many friends as you want to your scheduling groups."
-    },
-    {
-      question: "Can I delete schedules or leave groups?",
-      answer: "Yes, you can delete your own schedules anytime. Group creators can delete entire groups, and members can leave groups whenever they want."
-    },
-    {
-      question: "Do I need to download an app?",
-      answer: "No! Meanwhile works entirely in your web browser on any device - desktop, tablet, or mobile."
     },
     {
       question: "Is Meanwhile free?",
@@ -116,7 +97,7 @@ const Landing = () => {
         <div className="container mx-auto max-w-4xl">
           <div className="text-center mb-16">
             <h3 className="text-4xl font-bold mb-6 font-heading bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-200 bg-clip-text text-transparent">
-              Frequently Asked Questions
+              FAQ - Only 3 Questions
             </h3>
             <p className="text-xl text-slate-600 dark:text-slate-300 font-body">
               Everything you need to know about Meanwhile
