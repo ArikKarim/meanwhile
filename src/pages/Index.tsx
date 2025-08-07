@@ -12,15 +12,7 @@ import { LogOut, Calendar, Users, Settings, Palette, Eye, EyeOff, Clock } from '
 import { useToast } from '@/hooks/use-toast';
 import GroupManager from '@/components/GroupManager';
 import WeeklyCalendar from '@/components/WeeklyCalendar';
-
-// User color system
-const USER_COLORS_KEY = 'meanwhile_user_colors';
-// Calendar settings system
-const CALENDAR_SETTINGS_KEY = 'meanwhile_calendar_settings';
-
-interface UserColors {
-  [userId: string]: string;
-}
+import { supabase } from '@/integrations/supabase/client';
 
 interface CalendarSettings {
   [groupId: string]: {
@@ -28,53 +20,6 @@ interface CalendarSettings {
     endHour: number;
   };
 }
-
-const getUserColors = (): UserColors => {
-  try {
-    const stored = localStorage.getItem(USER_COLORS_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
-};
-
-const saveUserColors = (colors: UserColors) => {
-  localStorage.setItem(USER_COLORS_KEY, JSON.stringify(colors));
-};
-
-const getCalendarSettings = (): CalendarSettings => {
-  try {
-    const stored = localStorage.getItem(CALENDAR_SETTINGS_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
-};
-
-const saveCalendarSettings = (settings: CalendarSettings) => {
-  localStorage.setItem(CALENDAR_SETTINGS_KEY, JSON.stringify(settings));
-};
-
-const getGroups = () => {
-  try {
-    const stored = localStorage.getItem('meanwhile_groups');
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-};
-
-const getUserColor = (userId: string): string => {
-  const userColors = getUserColors();
-  return userColors[userId] || '#3b82f6'; // Default blue if no color set
-};
-
-const isColorTaken = (color: string, excludeUserId?: string): boolean => {
-  const userColors = getUserColors();
-  return Object.entries(userColors).some(([userId, userColor]) => 
-    userId !== excludeUserId && userColor.toLowerCase() === color.toLowerCase()
-  );
-};
 
 // Time Range Form Component
 const TimeRangeForm = ({ groupId, currentSettings, onUpdate }: {
@@ -164,23 +109,37 @@ const Index = () => {
   const [calendarSettings, setCalendarSettings] = useState<CalendarSettings>({});
   const [showTimeSettings, setShowTimeSettings] = useState(false);
 
-  // Initialize user color
+  // Initialize user color and load calendar settings
   useEffect(() => {
-    if (user?.id) {
-      setUserColor(getUserColor(user.id));
-    }
+    const loadUserData = async () => {
+      if (user?.id) {
+        // Load user color from profile
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('color')
+          .eq('user_id', user.id)
+          .single();
+        
+        if (profile?.color) {
+          setUserColor(profile.color);
+        }
+      }
+    };
+
+    loadUserData();
   }, [user?.id]);
 
-  // Load calendar settings
-  useEffect(() => {
-    setCalendarSettings(getCalendarSettings());
-  }, []);
-
   // Check if current user is group admin (creator)
-  const isGroupAdmin = (groupId: string): boolean => {
-    const groups = getGroups();
-    const group = groups.find(g => g.id === groupId);
-    return group?.created_by === user?.id;
+  const isGroupAdmin = async (groupId: string): Promise<boolean> => {
+    if (!user?.id) return false;
+    
+    const { data: group } = await supabase
+      .from('groups')
+      .select('created_by')
+      .eq('id', groupId)
+      .single();
+    
+    return group?.created_by === user.id;
   };
 
   // Get calendar time settings for current group
@@ -188,26 +147,71 @@ const Index = () => {
     return calendarSettings[groupId] || { startHour: 7, endHour: 21 };
   };
 
-  // Update calendar time settings
-  const updateTimeSettings = (groupId: string, startHour: number, endHour: number) => {
-    const newSettings = {
-      ...calendarSettings,
-      [groupId]: { startHour, endHour }
-    };
-    setCalendarSettings(newSettings);
-    saveCalendarSettings(newSettings);
-    setShowTimeSettings(false);
-    setRefreshKey(prev => prev + 1); // Force calendar refresh
-    toast({
-      title: "Calendar Updated",
-      description: `Calendar time range set to ${startHour < 12 ? startHour : startHour === 12 ? 12 : startHour - 12}${startHour < 12 ? 'AM' : 'PM'} - ${endHour < 12 ? endHour : endHour === 12 ? 12 : endHour - 12}${endHour < 12 ? 'AM' : 'PM'}`,
-    });
+  // Load calendar settings for a group
+  const loadGroupSettings = async (groupId: string) => {
+    const { data: settings } = await supabase
+      .from('group_settings')
+      .select('start_hour, end_hour')
+      .eq('group_id', groupId)
+      .single();
+
+    if (settings) {
+      setCalendarSettings(prev => ({
+        ...prev,
+        [groupId]: { startHour: settings.start_hour, endHour: settings.end_hour }
+      }));
+    }
   };
 
-  const updateUserColor = (newColor: string) => {
+  // Update calendar time settings
+  const updateTimeSettings = async (groupId: string, startHour: number, endHour: number) => {
+    try {
+      // Upsert group settings
+      const { error } = await supabase
+        .from('group_settings')
+        .upsert({ 
+          group_id: groupId,
+          start_hour: startHour,
+          end_hour: endHour
+        }, {
+          onConflict: 'group_id'
+        });
+
+      if (error) throw error;
+
+      const newSettings = {
+        ...calendarSettings,
+        [groupId]: { startHour, endHour }
+      };
+      setCalendarSettings(newSettings);
+      setShowTimeSettings(false);
+      setRefreshKey(prev => prev + 1); // Force calendar refresh
+      
+      toast({
+        title: "Calendar Updated",
+        description: `Calendar time range set to ${startHour < 12 ? startHour : startHour === 12 ? 12 : startHour - 12}${startHour < 12 ? 'AM' : 'PM'} - ${endHour < 12 ? endHour : endHour === 12 ? 12 : endHour - 12}${endHour < 12 ? 'AM' : 'PM'}`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error updating settings",
+        description: error.message,
+        variant: "destructive"
+      });
+    }
+  };
+
+  const updateUserColor = async (newColor: string) => {
     if (!user?.id) return;
     
-    if (isColorTaken(newColor, user.id)) {
+    // Check if color is already taken
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('user_id')
+      .eq('color', newColor)
+      .neq('user_id', user.id)
+      .single();
+
+    if (existingProfile) {
       toast({
         title: "Color already taken",
         description: "Another user is already using this color. Please choose a different one.",
@@ -216,13 +220,21 @@ const Index = () => {
       return;
     }
 
-    const userColors = getUserColors();
-    userColors[user.id] = newColor;
-    saveUserColors(userColors);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ color: newColor })
+      .eq('user_id', user.id);
+
+    if (error) {
+      toast({
+        title: "Error updating color",
+        description: error.message,
+        variant: "destructive"
+      });
+      return;
+    }
+
     setUserColor(newColor);
-    
-    // Dispatch custom event to notify other components
-    window.dispatchEvent(new CustomEvent('userColorChanged'));
     
     toast({
       title: "Color updated",
@@ -233,25 +245,22 @@ const Index = () => {
   // Get group members for user filtering
   const fetchGroupMembers = async (groupId: string) => {
     try {
-      const storedMembers = localStorage.getItem('meanwhile_group_members');
-      const storedUsers = localStorage.getItem('meanwhile_users');
-      
-      if (!storedMembers || !storedUsers) return;
-      
-      const allMembers = JSON.parse(storedMembers);
-      const allUsers = JSON.parse(storedUsers);
-      
-      const groupMemberData = allMembers
-        .filter((member: any) => member.group_id === groupId)
-        .map((member: any) => {
-          const userData = allUsers.find((u: any) => u.id === member.user_id);
-          return {
-            id: member.user_id,
-            username: userData?.username || 'Unknown',
-            firstName: userData?.firstName,
-            lastName: userData?.lastName
-          };
-        });
+      const { data: memberData, error } = await supabase
+        .from('group_members')
+        .select(`
+          user_id,
+          profiles!inner(user_id, username, first_name, last_name)
+        `)
+        .eq('group_id', groupId);
+
+      if (error) throw error;
+
+      const groupMemberData = (memberData || []).map((member: any) => ({
+        id: member.user_id,
+        username: member.profiles.username,
+        firstName: member.profiles.first_name,
+        lastName: member.profiles.last_name
+      }));
       
       setGroupMembers(groupMemberData);
       // Initially show all users
@@ -265,6 +274,7 @@ const Index = () => {
   useEffect(() => {
     if (selectedGroupId) {
       fetchGroupMembers(selectedGroupId);
+      loadGroupSettings(selectedGroupId);
     } else {
       setGroupMembers([]);
       setVisibleUsers(new Set());
@@ -405,7 +415,7 @@ const Index = () => {
                           <div 
                             className="w-3 h-3 rounded-full" 
                             style={{ 
-                              backgroundColor: member.id === user?.id ? '#3b82f6' : '#64748b',
+                              backgroundColor: member.id === user?.id ? userColor : '#64748b',
                               opacity: visibleUsers.has(member.id) ? 1 : 0.3
                             }}
                           />
@@ -480,7 +490,7 @@ const Index = () => {
                       </h3>
                       <div className="flex items-center gap-3">
                         {/* Time Settings Button (for admin) */}
-                        {isGroupAdmin(selectedGroupId) && (
+                        {user?.id && (
                           <Dialog open={showTimeSettings} onOpenChange={setShowTimeSettings}>
                             <DialogTrigger asChild>
                               <Button variant="outline" size="sm" className="h-8">

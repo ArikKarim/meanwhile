@@ -43,6 +43,33 @@ export type Database = {
           },
         ]
       }
+      group_settings: {
+        Row: {
+          created_at: string
+          end_hour: number
+          group_id: string
+          id: string
+          start_hour: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          end_hour?: number
+          group_id: string
+          id?: string
+          start_hour?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          end_hour?: number
+          group_id?: string
+          id?: string
+          start_hour?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       groups: {
         Row: {
           code: string
@@ -72,22 +99,31 @@ export type Database = {
       }
       profiles: {
         Row: {
+          color: string | null
           created_at: string
+          first_name: string | null
           id: string
+          last_name: string | null
           updated_at: string
           user_id: string
           username: string
         }
         Insert: {
+          color?: string | null
           created_at?: string
+          first_name?: string | null
           id?: string
+          last_name?: string | null
           updated_at?: string
           user_id: string
           username: string
         }
         Update: {
+          color?: string | null
           created_at?: string
+          first_name?: string | null
           id?: string
+          last_name?: string | null
           updated_at?: string
           user_id?: string
           username?: string

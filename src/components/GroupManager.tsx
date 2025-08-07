@@ -9,6 +9,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
 import { Users, Copy, Trash2, Crown, User } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface Group {
   id: string;
@@ -23,86 +24,6 @@ interface GroupManagerProps {
   selectedGroupId?: string;
 }
 
-// Simple localStorage-based group management
-const GROUPS_KEY = 'meanwhile_groups';
-const GROUP_MEMBERS_KEY = 'meanwhile_group_members';
-const TIME_BLOCKS_KEY = 'meanwhile_time_blocks';
-
-interface StoredGroup {
-  id: string;
-  name: string;
-  code: string;
-  created_by: string;
-  created_at: string;
-}
-
-interface GroupMember {
-  id: string;
-  group_id: string;
-  user_id: string;
-  joined_at: string;
-}
-
-interface TimeBlock {
-  id: string;
-  user_id: string;
-  group_id: string;
-  label: string;
-  day_of_week: number;
-  start_time: string;
-  end_time: string;
-  color: string;
-  tag: string;
-  created_at: string;
-}
-
-const getStoredGroups = (): StoredGroup[] => {
-  try {
-    const stored = localStorage.getItem(GROUPS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveStoredGroups = (groups: StoredGroup[]) => {
-  localStorage.setItem(GROUPS_KEY, JSON.stringify(groups));
-};
-
-const getGroupMembers = (): GroupMember[] => {
-  try {
-    const stored = localStorage.getItem(GROUP_MEMBERS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveGroupMembers = (members: GroupMember[]) => {
-  localStorage.setItem(GROUP_MEMBERS_KEY, JSON.stringify(members));
-};
-
-const getTimeBlocks = (): TimeBlock[] => {
-  try {
-    const stored = localStorage.getItem(TIME_BLOCKS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveTimeBlocks = (timeBlocks: TimeBlock[]) => {
-  localStorage.setItem(TIME_BLOCKS_KEY, JSON.stringify(timeBlocks));
-};
-
-const generateGroupCode = (): string => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let result = '';
-  for (let i = 0; i < 6; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-};
 
 const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => {
   const { user } = useAuth();
@@ -123,21 +44,31 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
 
     setLoading(true);
     try {
-      const allGroups = getStoredGroups();
-      const allMembers = getGroupMembers();
-      
       // Get groups where user is a member
-      const userMemberGroups = allMembers
-        .filter(member => member.user_id === user.id)
-        .map(member => member.group_id);
-      
-      const userGroups = allGroups.filter(group => userMemberGroups.includes(group.id));
-      
-      // Add member counts
-      const groupsWithCounts = userGroups.map(group => ({
-        ...group,
-        member_count: allMembers.filter(member => member.group_id === group.id).length
-      }));
+      const { data: groupsData, error: groupsError } = await supabase
+        .from('groups')
+        .select(`
+          *,
+          group_members!inner(user_id)
+        `)
+        .eq('group_members.user_id', user.id);
+
+      if (groupsError) throw groupsError;
+
+      // Get member counts for each group
+      const groupsWithCounts = await Promise.all(
+        (groupsData || []).map(async (group) => {
+          const { count } = await supabase
+            .from('group_members')
+            .select('*', { count: 'exact', head: true })
+            .eq('group_id', group.id);
+          
+          return {
+            ...group,
+            member_count: count || 0
+          };
+        })
+      );
 
       setGroups(groupsWithCounts);
       
@@ -168,43 +99,36 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
     const name = formData.get('groupName') as string;
 
     try {
-      const allGroups = getStoredGroups();
-      
-      // Generate unique code
-      let code = '';
-      let isUnique = false;
-      while (!isUnique) {
-        code = generateGroupCode();
-        isUnique = !allGroups.find(g => g.code === code);
-      }
+      // Use Supabase function to generate unique code
+      const { data: codeResult, error: codeError } = await supabase.rpc('generate_group_code');
+      if (codeError) throw codeError;
 
       // Create group
-      const newGroup: StoredGroup = {
-        id: `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name: name.trim(),
-        code,
-        created_by: user.id,
-        created_at: new Date().toISOString()
-      };
+      const { data: groupData, error: groupError } = await supabase
+        .from('groups')
+        .insert({
+          name: name.trim(),
+          code: codeResult,
+          created_by: user.id
+        })
+        .select()
+        .single();
 
-      allGroups.push(newGroup);
-      saveStoredGroups(allGroups);
+      if (groupError) throw groupError;
 
       // Add creator as member
-      const allMembers = getGroupMembers();
-      const newMember: GroupMember = {
-        id: `member_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        group_id: newGroup.id,
-        user_id: user.id,
-        joined_at: new Date().toISOString()
-      };
+      const { error: memberError } = await supabase
+        .from('group_members')
+        .insert({
+          group_id: groupData.id,
+          user_id: user.id
+        });
 
-      allMembers.push(newMember);
-      saveGroupMembers(allMembers);
+      if (memberError) throw memberError;
 
       toast({
         title: "Group created!",
-        description: `Share code "${code}" with friends to invite them.`,
+        description: `Share code "${codeResult}" with friends to invite them.`,
       });
 
       (e.target as HTMLFormElement).reset();
@@ -229,37 +153,42 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
     const code = formData.get('groupCode') as string;
 
     try {
-      const allGroups = getStoredGroups();
-      const group = allGroups.find(g => g.code.toUpperCase() === code.toUpperCase());
+      // Find group by code
+      const { data: groupData, error: groupError } = await supabase
+        .from('groups')
+        .select('*')
+        .ilike('code', code.toUpperCase())
+        .single();
 
-      if (!group) {
+      if (groupError || !groupData) {
         throw new Error('Group not found. Please check the code and try again.');
       }
 
       // Check if user is already a member
-      const allMembers = getGroupMembers();
-      const existingMember = allMembers.find(m => 
-        m.group_id === group.id && m.user_id === user.id
-      );
+      const { data: existingMember } = await supabase
+        .from('group_members')
+        .select('*')
+        .eq('group_id', groupData.id)
+        .eq('user_id', user.id)
+        .single();
 
       if (existingMember) {
         throw new Error('You are already a member of this group.');
       }
 
       // Add user as member
-      const newMember: GroupMember = {
-        id: `member_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        group_id: group.id,
-        user_id: user.id,
-        joined_at: new Date().toISOString()
-      };
+      const { error: memberError } = await supabase
+        .from('group_members')
+        .insert({
+          group_id: groupData.id,
+          user_id: user.id
+        });
 
-      allMembers.push(newMember);
-      saveGroupMembers(allMembers);
+      if (memberError) throw memberError;
 
       toast({
         title: "Joined group!",
-        description: `You've successfully joined "${group.name}".`,
+        description: `You've successfully joined "${groupData.name}".`,
       });
 
       (e.target as HTMLFormElement).reset();
@@ -279,33 +208,47 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
     if (!user) return;
 
     try {
-      // Get current data
-      const allGroups = getStoredGroups();
-      const allMembers = getGroupMembers();
-      const allTimeBlocks = getTimeBlocks();
-
       // Find the group to check if user is the creator
-      const group = allGroups.find(g => g.id === groupId);
-      if (!group) {
+      const { data: groupData, error: groupError } = await supabase
+        .from('groups')
+        .select('*')
+        .eq('id', groupId)
+        .single();
+
+      if (groupError || !groupData) {
         throw new Error('Group not found.');
       }
 
       // Only allow creator to delete the group
-      if (group.created_by !== user.id) {
+      if (groupData.created_by !== user.id) {
         throw new Error('Only the group creator can delete this group.');
       }
 
-      // Remove the group
-      const updatedGroups = allGroups.filter(g => g.id !== groupId);
-      saveStoredGroups(updatedGroups);
+      // Delete all time blocks for this group
+      await supabase
+        .from('time_blocks')
+        .delete()
+        .eq('group_id', groupId);
 
-      // Remove all members from the group
-      const updatedMembers = allMembers.filter(m => m.group_id !== groupId);
-      saveGroupMembers(updatedMembers);
+      // Delete all members from the group
+      await supabase
+        .from('group_members')
+        .delete()
+        .eq('group_id', groupId);
 
-      // Remove all time blocks for this group
-      const updatedTimeBlocks = allTimeBlocks.filter(tb => tb.group_id !== groupId);
-      saveTimeBlocks(updatedTimeBlocks);
+      // Delete group settings
+      await supabase
+        .from('group_settings')
+        .delete()
+        .eq('group_id', groupId);
+
+      // Delete the group
+      const { error: deleteError } = await supabase
+        .from('groups')
+        .delete()
+        .eq('id', groupId);
+
+      if (deleteError) throw deleteError;
 
       toast({
         title: "Group deleted",

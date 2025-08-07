@@ -7,46 +7,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar, Plus } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 
 interface ScheduleFormProps {
   groupId: string;
   onScheduleAdded: () => void;
 }
 
-// User color preferences storage
-const USER_COLORS_KEY = 'meanwhile_user_colors';
-
-interface UserColors {
-  [userId: string]: string;
-}
-
-const getUserColors = (): UserColors => {
-  try {
-    const stored = localStorage.getItem(USER_COLORS_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
-};
-
-const saveUserColors = (colors: UserColors) => {
-  localStorage.setItem(USER_COLORS_KEY, JSON.stringify(colors));
-};
-
-const getUserColor = (userId: string): string => {
-  const userColors = getUserColors();
-  return userColors[userId] || '#3b82f6'; // Default blue if no color set
-};
-
-const isColorTaken = (color: string, excludeUserId?: string): boolean => {
-  const userColors = getUserColors();
-  return Object.entries(userColors).some(([userId, userColor]) => 
-    userId !== excludeUserId && userColor.toLowerCase() === color.toLowerCase()
-  );
-};
-
-// Simple localStorage-based time block management
-const TIME_BLOCKS_KEY = 'meanwhile_time_blocks';
 
 interface TimeBlock {
   id: string;
@@ -60,19 +27,6 @@ interface TimeBlock {
   tag: string;
   created_at: string;
 }
-
-const getTimeBlocks = (): TimeBlock[] => {
-  try {
-    const stored = localStorage.getItem(TIME_BLOCKS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveTimeBlocks = (timeBlocks: TimeBlock[]) => {
-  localStorage.setItem(TIME_BLOCKS_KEY, JSON.stringify(timeBlocks));
-};
 
 // Overlap detection utilities
 const timeToMinutes = (timeString: string): number => {
@@ -99,16 +53,23 @@ const doTimeBlocksOverlap = (block1: TimeBlock, block2: TimeBlock): boolean => {
   return start1 < end2 && start2 < end1;
 };
 
-const findOverlappingBlocks = (
+const findOverlappingBlocks = async (
   newBlocks: TimeBlock[], 
-  existingBlocks: TimeBlock[], 
+  groupId: string,
   userId?: string
-): { userOverlaps: TimeBlock[], otherUserOverlaps: TimeBlock[] } => {
+): Promise<{ userOverlaps: TimeBlock[], otherUserOverlaps: TimeBlock[] }> => {
+  const { data: existingBlocks, error } = await supabase
+    .from('time_blocks')
+    .select('*')
+    .eq('group_id', groupId);
+
+  if (error) throw error;
+
   const userOverlaps: TimeBlock[] = [];
   const otherUserOverlaps: TimeBlock[] = [];
   
   newBlocks.forEach(newBlock => {
-    existingBlocks.forEach(existingBlock => {
+    (existingBlocks || []).forEach(existingBlock => {
       if (doTimeBlocksOverlap(newBlock, existingBlock)) {
         if (!userId || existingBlock.user_id === userId) {
           userOverlaps.push(existingBlock);
@@ -157,19 +118,39 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
   const [userColor, setUserColor] = useState('#3b82f6');
 
   useEffect(() => {
-    if (user?.id) {
-      setUserColor(getUserColor(user.id));
-    }
+    const fetchUserColor = async () => {
+      if (user?.id) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('color')
+          .eq('user_id', user.id)
+          .single();
+        
+        if (profile?.color) {
+          setUserColor(profile.color);
+        }
+      }
+    };
+    
+    fetchUserColor();
   }, [user?.id]);
 
   const getCurrentColor = () => {
     return customColor || userColor;
   };
 
-  const updateUserColor = (newColor: string) => {
+  const updateUserColor = async (newColor: string) => {
     if (!user?.id) return;
     
-    if (isColorTaken(newColor, user.id)) {
+    // Check if color is already taken
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('user_id')
+      .eq('color', newColor)
+      .neq('user_id', user.id)
+      .single();
+
+    if (existingProfile) {
       toast({
         title: "Color already taken",
         description: "Another user is already using this color. Please choose a different one.",
@@ -178,10 +159,26 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
       return;
     }
 
-    const userColors = getUserColors();
-    userColors[user.id] = newColor;
-    saveUserColors(userColors);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ color: newColor })
+      .eq('user_id', user.id);
+
+    if (error) {
+      toast({
+        title: "Error updating color",
+        description: error.message,
+        variant: "destructive"
+      });
+      return;
+    }
+
     setUserColor(newColor);
+    
+    toast({
+      title: "Color updated",
+      description: "Your color has been successfully updated!"
+    });
   };
 
   const handleDayToggle = (dayValue: number) => {
@@ -218,8 +215,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
         newTimeBlocks.push(newTimeBlock);
       });
 
-      const allTimeBlocks = getTimeBlocks();
-      const { userOverlaps, otherUserOverlaps } = findOverlappingBlocks(newTimeBlocks, allTimeBlocks, user?.id);
+      const { userOverlaps, otherUserOverlaps } = await findOverlappingBlocks(newTimeBlocks, groupId, user?.id);
 
       if (userOverlaps.length > 0) {
         toast({
@@ -239,7 +235,21 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
         });
       }
 
-      saveTimeBlocks([...allTimeBlocks, ...newTimeBlocks]);
+      // Insert time blocks into database
+      const { error } = await supabase
+        .from('time_blocks')
+        .insert(newTimeBlocks.map(block => ({
+          user_id: block.user_id,
+          group_id: block.group_id,
+          label: block.label,
+          day_of_week: block.day_of_week,
+          start_time: block.start_time,
+          end_time: block.end_time,
+          color: block.color,
+          tag: block.tag
+        })));
+
+      if (error) throw error;
 
       // Reset form
       setFormData({

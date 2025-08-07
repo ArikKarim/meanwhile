@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Edit3, Trash2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface TimeBlock {
   id: string;
@@ -29,26 +30,6 @@ interface WeeklyCalendarProps {
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-// User color system (replaces category-based colors)
-const USER_COLORS_KEY = 'meanwhile_user_colors';
-
-interface UserColors {
-  [userId: string]: string;
-}
-
-const getUserColors = (): UserColors => {
-  try {
-    const stored = localStorage.getItem(USER_COLORS_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
-};
-
-const getUserColor = (userId: string): string => {
-  const userColors = getUserColors();
-  return userColors[userId] || '#3b82f6'; // Default blue if no color set
-};
 
 // Category options (no colors, just tags)
 const CATEGORIES = [
@@ -94,82 +75,30 @@ const getOverlapLevel = (block: TimeBlock, allBlocks: TimeBlock[]): { selfOverla
   return { selfOverlap, otherOverlap };
 };
 
-// Simple localStorage access
-const TIME_BLOCKS_KEY = 'meanwhile_time_blocks';
-const USERS_KEY = 'meanwhile_users';
-const GROUP_MEMBERS_KEY = 'meanwhile_group_members';
-
-interface StoredUser {
+interface ProfileData {
   id: string;
   username: string;
-  password: string;
-  firstName: string;
-  lastName: string;
-}
-
-interface GroupMember {
-  id: string;
-  group_id: string;
-  user_id: string;
-  joined_at: string;
-}
-
-interface StoredTimeBlock {
-  id: string;
-  user_id: string;
-  group_id: string;
-  label: string;
-  day_of_week: number;
-  start_time: string;
-  end_time: string;
+  first_name?: string;
+  last_name?: string;
   color: string;
-  tag: string;
-  created_at: string;
 }
 
-const getTimeBlocks = (): StoredTimeBlock[] => {
-  try {
-    const stored = localStorage.getItem(TIME_BLOCKS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-};
-
-const getUsers = (): StoredUser[] => {
-  try {
-    const stored = localStorage.getItem(USERS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-};
-
-const getGroupMembers = (): GroupMember[] => {
-  try {
-    const stored = localStorage.getItem(GROUP_MEMBERS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-};
-
-const getDisplayName = (user: StoredUser | undefined): string => {
-  if (!user) return 'Unknown User';
-  if (!user.firstName && !user.lastName) return user.username;
+const getDisplayName = (profile: ProfileData | undefined): string => {
+  if (!profile) return 'Unknown User';
+  if (!profile.first_name && !profile.last_name) return profile.username;
   
-  const firstName = user.firstName?.trim() || '';
-  const lastInitial = user.lastName?.trim()?.charAt(0)?.toUpperCase() || '';
+  const firstName = profile.first_name?.trim() || '';
+  const lastInitial = profile.last_name?.trim()?.charAt(0)?.toUpperCase() || '';
   
   if (firstName && lastInitial) {
     return `${firstName} ${lastInitial}`;
   } else if (firstName) {
     return firstName;
-  } else if (user.lastName) {
-    return user.lastName;
+  } else if (profile.last_name) {
+    return profile.last_name;
   }
   
-  return user.username;
+  return profile.username;
 };
 
 const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHour = 21 }: WeeklyCalendarProps) => {
@@ -182,7 +111,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
 
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [loading, setLoading] = useState(true);
-  const [userColors, setUserColors] = useState<{[userId: string]: string}>({});
+  const [profiles, setProfiles] = useState<{[userId: string]: ProfileData}>({});
   const [editingBlock, setEditingBlock] = useState<TimeBlock | null>(null);
   const [editForm, setEditForm] = useState({
     label: '',
@@ -220,10 +149,6 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
   
   const { user } = useAuth();
 
-  const saveTimeBlocks = (blocks: StoredTimeBlock[]) => {
-    localStorage.setItem(TIME_BLOCKS_KEY, JSON.stringify(blocks));
-  };
-
   const handleEditBlock = (block: TimeBlock) => {
     setEditingBlock(block);
     const formData = {
@@ -240,18 +165,16 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     if (!editingBlock || !user) return;
 
     try {
-      const allTimeBlocks = getTimeBlocks();
-      const updatedBlocks = allTimeBlocks.map(block => 
-        block.id === editingBlock.id 
-          ? { 
-              ...block, 
-              ...editForm,
-              color: userColors[user?.id || ''] || getUserColor(user?.id || '') // Set color based on current user color
-            }
-          : block
-      );
-      
-      saveTimeBlocks(updatedBlocks);
+      const { error } = await supabase
+        .from('time_blocks')
+        .update({
+          ...editForm,
+          color: profiles[user.id]?.color || '#3b82f6'
+        })
+        .eq('id', editingBlock.id);
+
+      if (error) throw error;
+
       setEditingBlock(null);
       
       // Refresh the display
@@ -265,10 +188,12 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     if (!user) return;
 
     try {
-      const allTimeBlocks = getTimeBlocks();
-      const filteredBlocks = allTimeBlocks.filter(block => block.id !== blockId);
-      
-      saveTimeBlocks(filteredBlocks);
+      const { error } = await supabase
+        .from('time_blocks')
+        .delete()
+        .eq('id', blockId);
+
+      if (error) throw error;
       
       // Refresh the display
       fetchTimeBlocks();
@@ -284,7 +209,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
   };
 
-  const handleTimeSlotClick = (dayIndex: number, timeSlot: { hour: number; minute: number; time: string }, event: React.MouseEvent) => {
+  const handleTimeSlotClick = async (dayIndex: number, timeSlot: { hour: number; minute: number; time: string }, event: React.MouseEvent) => {
     if (!user || viewMode !== 'busy') return;
     
     // Use the exact time slot that was clicked
@@ -292,43 +217,46 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     const startMinutes = timeToMinutes(startTime);
     const endTime = minutesToTime(Math.min(startMinutes + 60, endHour * 60)); // Default 1 hour duration, cap at end hour
     
-    // Create quick event
-    const newBlock = {
-      id: `tb_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      user_id: user.id,
-      group_id: groupId,
-      label: 'New Event',
-      day_of_week: dayIndex,
-      start_time: startTime,
-      end_time: endTime,
-      color: userColors[user.id] || getUserColor(user.id),
-      tag: 'class',
-      created_at: new Date().toISOString()
-    };
-    
-    // Add to storage
-    const allTimeBlocks = getTimeBlocks();
-    saveTimeBlocks([...allTimeBlocks, newBlock]);
-    
-    // Refresh display
-    fetchTimeBlocks();
-    
-    // Open edit dialog immediately
-    const blockWithDisplay = {
-      ...newBlock,
-      displayName: user.firstName && user.lastName 
-        ? `${user.firstName} ${user.lastName.charAt(0)}`
-        : user.username
-    };
-    setEditingBlock(blockWithDisplay);
-    const formData = {
-      label: newBlock.label,
-      start_time: newBlock.start_time,
-      end_time: newBlock.end_time,
-      tag: newBlock.tag
-    };
-    setEditForm(formData);
-    setOriginalEditForm(formData); // Store original values for new blocks
+    try {
+      // Create quick event in database
+      const { data: newBlock, error } = await supabase
+        .from('time_blocks')
+        .insert({
+          user_id: user.id,
+          group_id: groupId,
+          label: 'New Event',
+          day_of_week: dayIndex,
+          start_time: startTime,
+          end_time: endTime,
+          color: profiles[user.id]?.color || '#3b82f6',
+          tag: 'class'
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Refresh display
+      fetchTimeBlocks();
+      
+      // Open edit dialog immediately
+      const profile = profiles[user.id];
+      const blockWithDisplay = {
+        ...newBlock,
+        displayName: getDisplayName(profile)
+      };
+      setEditingBlock(blockWithDisplay);
+      const formData = {
+        label: newBlock.label,
+        start_time: newBlock.start_time,
+        end_time: newBlock.end_time,
+        tag: newBlock.tag
+      };
+      setEditForm(formData);
+      setOriginalEditForm(formData); // Store original values for new blocks
+    } catch (error) {
+      console.error('Error creating time block:', error);
+    }
   };
 
   const handleMouseDown = (blockId: string, dragType: 'top' | 'bottom', event: React.MouseEvent) => {
@@ -376,19 +304,25 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     ));
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = async () => {
     if (!dragState.blockId) return;
     
     // Save the changes permanently
     const block = timeBlocks.find(b => b.id === dragState.blockId);
     if (block && block.user_id === user?.id) {
-      const allTimeBlocks = getTimeBlocks();
-      const updatedBlocks = allTimeBlocks.map(b => 
-        b.id === dragState.blockId 
-          ? { ...b, start_time: block.start_time, end_time: block.end_time }
-          : b
-      );
-      saveTimeBlocks(updatedBlocks);
+      try {
+        const { error } = await supabase
+          .from('time_blocks')
+          .update({
+            start_time: block.start_time,
+            end_time: block.end_time
+          })
+          .eq('id', dragState.blockId);
+
+        if (error) throw error;
+      } catch (error) {
+        console.error('Error updating time block:', error);
+      }
     }
     
     setDragState({
@@ -413,43 +347,57 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     }
   }, [dragState]);
 
-    const fetchTimeBlocks = async () => {
+  const fetchTimeBlocks = async () => {
     try {
       setLoading(true);
       
-      const allTimeBlocks = getTimeBlocks();
-      const allUsers = getUsers();
-      const groupMembers = getGroupMembers();
-      
-      // Filter time blocks for this group
-      const groupTimeBlocks = allTimeBlocks.filter(block => block.group_id === groupId);
-      
-      // Get member user IDs
-      const groupMemberIds = groupMembers
-        .filter(member => member.group_id === groupId)
-        .map(member => member.user_id);
-      
-      // Filter time blocks to only include group members
-      let memberTimeBlocks = groupTimeBlocks.filter(block => 
-        groupMemberIds.includes(block.user_id)
-      );
-      
+      // Get time blocks for this group first
+      const { data: timeBlocksData, error: timeBlocksError } = await supabase
+        .from('time_blocks')
+        .select('*')
+        .eq('group_id', groupId);
+
+      if (timeBlocksError) throw timeBlocksError;
+
+      // Get profiles for the users with time blocks
+      const userIds = [...new Set((timeBlocksData || []).map(block => block.user_id))];
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles')
+        .select('user_id, username, first_name, last_name, color')
+        .in('user_id', userIds);
+
+      if (profilesError) throw profilesError;
+
       // Apply user visibility filter for busy mode
+      let filteredBlocks = timeBlocksData || [];
       if (viewMode === 'busy' && visibleUsers && visibleUsers.size > 0) {
-        memberTimeBlocks = memberTimeBlocks.filter(block => 
+        filteredBlocks = filteredBlocks.filter(block => 
           visibleUsers.has(block.user_id)
         );
       }
       
+      // Create profiles map
+      const profilesMap: {[userId: string]: ProfileData} = {};
+      (profilesData || []).forEach(profile => {
+        profilesMap[profile.user_id] = {
+          id: profile.user_id,
+          username: profile.username,
+          first_name: profile.first_name,
+          last_name: profile.last_name,
+          color: profile.color
+        };
+      });
+      
       // Add display names to time blocks
-      const blocksWithDisplayNames = memberTimeBlocks.map(block => {
-        const blockUser = allUsers.find(u => u.id === block.user_id);
+      const blocksWithDisplayNames = filteredBlocks.map(block => {
+        const profile = profilesMap[block.user_id];
         return {
           ...block,
-          displayName: getDisplayName(blockUser)
+          displayName: getDisplayName(profile)
         };
       });
 
+      setProfiles(profilesMap);
       setTimeBlocks(blocksWithDisplayNames);
     } catch (error) {
       console.error('Error fetching time blocks:', error);
@@ -457,7 +405,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     } finally {
       setLoading(false);
     }
-    };
+  };
 
   useEffect(() => {
     if (!groupId) return;
@@ -470,35 +418,28 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     return () => clearInterval(interval);
   }, [groupId, visibleUsers]); // Added visibleUsers as dependency
 
-  // Monitor user color changes and update state
+  // Set up realtime subscription for time blocks
   useEffect(() => {
-    const loadUserColors = () => {
-      setUserColors(getUserColors());
-    };
+    if (!groupId) return;
 
-    // Load initial colors
-    loadUserColors();
+    const channel = supabase
+      .channel('time_blocks_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'time_blocks',
+          filter: `group_id=eq.${groupId}`
+        },
+        () => fetchTimeBlocks()
+      )
+      .subscribe();
 
-    // Listen for storage changes (when user colors are updated)
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === USER_COLORS_KEY) {
-        loadUserColors();
-      }
-    };
-
-    // Listen for custom events from the color picker
-    const handleColorChange = () => {
-      loadUserColors();
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('userColorChanged', handleColorChange);
-    
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('userColorChanged', handleColorChange);
+      supabase.removeChannel(channel);
     };
-  }, []);
+  }, [groupId]);
 
   const formatTime = (time: string) => {
     const [hours, minutes] = time.split(':');
@@ -715,7 +656,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                 const leftPosition = block.totalColumns > 1 ? `${(block.column * 100) / block.totalColumns}%` : '0%';
                 
                 // Get current user color (dynamic)
-                const currentUserColor = userColors[block.user_id] || block.color || '#3b82f6';
+                const currentUserColor = profiles[block.user_id]?.color || block.color || '#3b82f6';
                 
                 // Only show warning for personal overlaps (same user)
                 const showWarning = selfOverlap;
