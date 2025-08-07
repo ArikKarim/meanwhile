@@ -471,57 +471,48 @@ const Index = () => {
           <div className="lg:col-span-3">
             {selectedGroupId ? (
               <div className="space-y-6">
-                {/* View Mode Toggle */}
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-semibold flex items-center gap-2">
-                    <Users className="h-5 w-5" />
-                    Group Schedule
-                  </h2>
-                  <div className="flex items-center gap-2">
-                    {selectedGroupId && isGroupAdmin(selectedGroupId) && (
-                      <Dialog open={showTimeSettings} onOpenChange={setShowTimeSettings}>
-                        <DialogTrigger asChild>
-                          <Button variant="outline" size="sm" className="gap-2">
-                            <Clock className="h-4 w-4" />
-                            Time Settings
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="sm:max-w-[425px]">
-                          <DialogHeader>
-                            <DialogTitle>Calendar Time Range</DialogTitle>
-                            <DialogDescription>
-                              Set the calendar time range for all group members.
-                            </DialogDescription>
-                          </DialogHeader>
-                          <TimeRangeForm 
-                            groupId={selectedGroupId}
-                            currentSettings={getGroupTimeSettings(selectedGroupId)}
-                            onUpdate={updateTimeSettings}
-                          />
-                        </DialogContent>
-                      </Dialog>
-                    )}
-                    <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'busy' | 'free')}>
-                      <TabsList>
-                        <TabsTrigger value="busy">Who's Busy</TabsTrigger>
-                        <TabsTrigger value="free">Who's Free</TabsTrigger>
-                      </TabsList>
-                    </Tabs>
-                  </div>
-                </div>
-
                 {/* Calendar */}
                 <div className="bg-white rounded-lg border shadow-sm">
                   <div className="p-4 border-b">
-                    <h3 className="font-medium text-base font-body">
-                      {viewMode === 'busy' ? "Everyone's Schedule" : "Free Time Overlap"}
-                    </h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {viewMode === 'busy' 
-                        ? 'View when group members are busy' 
-                        : 'Find common free time slots'
-                      }
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-medium text-base font-body">
+                        Group Schedule
+                      </h3>
+                      <div className="flex items-center gap-3">
+                        {/* Time Settings Button (for admin) */}
+                        {isGroupAdmin(selectedGroupId) && (
+                          <Dialog open={showTimeSettings} onOpenChange={setShowTimeSettings}>
+                            <DialogTrigger asChild>
+                              <Button variant="outline" size="sm" className="h-8">
+                                <Clock className="h-3 w-3 mr-1" />
+                                Time Settings
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-[425px]">
+                              <DialogHeader>
+                                <DialogTitle>Calendar Time Range</DialogTitle>
+                                <DialogDescription>
+                                  Set the calendar time range for all group members.
+                                </DialogDescription>
+                              </DialogHeader>
+                              <TimeRangeForm 
+                                groupId={selectedGroupId}
+                                currentSettings={getGroupTimeSettings(selectedGroupId)}
+                                onUpdate={updateTimeSettings}
+                              />
+                            </DialogContent>
+                          </Dialog>
+                        )}
+                        
+                        {/* Who's Busy/Free Toggle */}
+                        <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as 'busy' | 'free')}>
+                          <TabsList className="h-8">
+                            <TabsTrigger value="busy" className="text-xs px-3">Who's Busy</TabsTrigger>
+                            <TabsTrigger value="free" className="text-xs px-3">Who's Free</TabsTrigger>
+                          </TabsList>
+                        </Tabs>
+                      </div>
+                    </div>
                   </div>
                   <div className="p-4">
                     <WeeklyCalendar 
