@@ -199,7 +199,9 @@ const Auth = () => {
             </Tabs>
             
             <div className="mt-6 text-center text-sm text-muted-foreground">
-              <p>No email required! Just pick a username and password.</p>
+              <Link to="/" className="text-blue-600 hover:text-blue-800 underline">
+                ← Back to home page
+              </Link>
             </div>
           </CardContent>
         </Card>
