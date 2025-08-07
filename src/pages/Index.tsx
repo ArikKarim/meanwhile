@@ -221,6 +221,9 @@ const Index = () => {
     saveUserColors(userColors);
     setUserColor(newColor);
     
+    // Dispatch custom event to notify other components
+    window.dispatchEvent(new CustomEvent('userColorChanged'));
+    
     toast({
       title: "Color updated",
       description: "Your color has been successfully updated!"

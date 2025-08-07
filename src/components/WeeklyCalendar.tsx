@@ -182,6 +182,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
 
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [loading, setLoading] = useState(true);
+  const [userColors, setUserColors] = useState<{[userId: string]: string}>({});
   const [editingBlock, setEditingBlock] = useState<TimeBlock | null>(null);
   const [editForm, setEditForm] = useState({
     label: '',
@@ -245,7 +246,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
           ? { 
               ...block, 
               ...editForm,
-              color: getUserColor(user?.id || '') // Set color based on user
+              color: userColors[user?.id || ''] || getUserColor(user?.id || '') // Set color based on current user color
             }
           : block
       );
@@ -300,7 +301,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       day_of_week: dayIndex,
       start_time: startTime,
       end_time: endTime,
-      color: getUserColor(user.id),
+      color: userColors[user.id] || getUserColor(user.id),
       tag: 'class',
       created_at: new Date().toISOString()
     };
@@ -468,6 +469,36 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     
     return () => clearInterval(interval);
   }, [groupId, visibleUsers]); // Added visibleUsers as dependency
+
+  // Monitor user color changes and update state
+  useEffect(() => {
+    const loadUserColors = () => {
+      setUserColors(getUserColors());
+    };
+
+    // Load initial colors
+    loadUserColors();
+
+    // Listen for storage changes (when user colors are updated)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === USER_COLORS_KEY) {
+        loadUserColors();
+      }
+    };
+
+    // Listen for custom events from the color picker
+    const handleColorChange = () => {
+      loadUserColors();
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('userColorChanged', handleColorChange);
+    
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('userColorChanged', handleColorChange);
+    };
+  }, []);
 
   const formatTime = (time: string) => {
     const [hours, minutes] = time.split(':');
@@ -683,6 +714,9 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                 const blockWidth = block.totalColumns > 1 ? `${100 / block.totalColumns}%` : '100%';
                 const leftPosition = block.totalColumns > 1 ? `${(block.column * 100) / block.totalColumns}%` : '0%';
                 
+                // Get current user color (dynamic)
+                const currentUserColor = userColors[block.user_id] || block.color || '#3b82f6';
+                
                 // Only show warning for personal overlaps (same user)
                 const showWarning = selfOverlap;
                 const borderStyle = showWarning ? 'border-2 border-red-400 border-dashed' : '';
@@ -699,13 +733,14 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                       height: `${Math.max(height - 4, 26)}px`,
                       left: leftPosition,
                       width: blockWidth,
-                      backgroundColor: block.color,
+                      backgroundColor: currentUserColor,
                       minHeight: '26px',
                       marginLeft: block.totalColumns > 1 ? '2px' : '4px',
                       marginRight: block.totalColumns > 1 ? '2px' : '4px',
                       cursor: isOwnBlock ? 'pointer' : 'default',
-                      border: `1px solid ${block.color}dd`,
-                      padding: Math.max(height - 4, 26) < 50 ? '2px 4px' : '4px 6px' // Responsive padding
+                      border: `1px solid ${currentUserColor}dd`,
+                      padding: Math.max(height - 4, 26) < 50 ? '2px 4px' : '4px 6px', // Responsive padding
+                      transition: 'background-color 0.3s ease, border-color 0.3s ease' // Smooth color transitions
                     }}
                     onClick={() => isOwnBlock && handleEditBlock(block)}
                   >
