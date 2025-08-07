@@ -6,19 +6,32 @@ import { Calendar, Users, Clock, ArrowRight, CheckCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const Landing = () => {
-  // Exactly 3 FAQ questions - forced refresh
+  // FAQ
   const faqs = [
     {
-      question: "How do I create a group?",
-      answer: "After signing up, click 'Create' in the Groups section, enter a group name, and you'll get a 6-character code to share with friends."
+      question: "What's the point of Meanwhile?",
+      answer: "Meanwhile is a tool to help you and your friends coordinate schedules. You can create a group, add events to your group, and see what times work for everyone."
     },
     {
-      question: "How do friends join my group?",
-      answer: "Share your group code with friends. They can sign up and enter the code in the 'Join' tab to instantly join your group."
+      question: "How do friends create or join a group?",
+      answer: "After signing up, click 'Create' in the Groups section, enter a group name, and you'll get a 6-character code to share with friends. If you already made a Meanwhile page, you can share your group code with friends. They can sign up and enter the code in the 'Join' tab to instantly join your group."
     },
     {
-      question: "Is Meanwhile free?",
-      answer: "Yes, Meanwhile is completely free to use with no limits or premium features."
+      question: "How can I report bugs?",
+      answer: (
+        <>
+          Reach out to Arik Karim on{" "}
+          <a 
+            href="https://linkedin.com/in/arikkarim" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800 underline font-medium"
+          >
+            LinkedIn
+          </a>
+          .
+        </>
+      )
     }
   ];
 
@@ -97,7 +110,7 @@ const Landing = () => {
         <div className="container mx-auto max-w-4xl">
           <div className="text-center mb-16">
             <h3 className="text-4xl font-bold mb-6 font-heading bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-200 bg-clip-text text-transparent">
-              FAQ - Only 3 Questions
+              Frequently Asked Questions
             </h3>
             <p className="text-xl text-slate-600 dark:text-slate-300 font-body">
               Everything you need to know about Meanwhile
@@ -130,7 +143,7 @@ const Landing = () => {
             Ready to simplify your group scheduling?
           </h3>
           <p className="text-xl text-blue-100 mb-10 font-body">
-            Join thousands of friends who are already coordinating better with Meanwhile.
+            Join your friends already coordinating schedules better with Meanwhile.
           </p>
           <Link to="/auth">
             <Button size="lg" className="bg-white text-blue-600 hover:bg-blue-50 font-semibold px-8 py-3 text-lg font-body">
