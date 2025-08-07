@@ -11,6 +11,8 @@
   font-weight: 400;
   font-style: normal;
   font-display: swap;
+  /* Fallback for when font fails to load */
+  unicode-range: U+0000-FFFF;
 }
 
 @font-face {
@@ -101,9 +103,9 @@
     --chart-5: 27 87% 67%;
     --radius: 0.5rem;
     
-    /* Custom font variables */
-    --font-heading: 'Instrument Serif', Georgia, serif;
-    --font-body: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    /* Custom font variables with robust fallbacks */
+    --font-heading: 'Instrument Serif', 'Crimson Text', 'Times New Roman', 'New York', 'SF Pro Display', Georgia, 'Times', serif;
+    --font-body: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', 'Segoe UI', Roboto, Arial, sans-serif;
   }
 
   .dark {
@@ -160,6 +162,20 @@
 }
 
 @layer components {
+  /* Font loading fallback classes */
+  .font-loading {
+    font-family: var(--font-body);
+  }
+  
+  /* Ensure smooth transition when custom fonts load */
+  .font-heading {
+    transition: font-family 0.3s ease;
+  }
+  
+  .font-body {
+    transition: font-family 0.3s ease;
+  }
+  
   /* Simple and reliable tracing border effect */
   .trace-border {
     position: relative;
