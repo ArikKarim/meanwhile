@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar, Plus } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 
 interface ScheduleFormProps {
   groupId: string;
@@ -61,17 +62,34 @@ interface TimeBlock {
   created_at: string;
 }
 
-const getTimeBlocks = (): TimeBlock[] => {
+const getTimeBlocks = async (): Promise<TimeBlock[]> => {
   try {
-    const stored = localStorage.getItem(TIME_BLOCKS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
+    const { data, error } = await supabase
+      .from('time_blocks')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching time blocks:', error);
     return [];
   }
 };
 
-const saveTimeBlocks = (timeBlocks: TimeBlock[]) => {
-  localStorage.setItem(TIME_BLOCKS_KEY, JSON.stringify(timeBlocks));
+const saveTimeBlocks = async (timeBlocks: Omit<TimeBlock, 'id' | 'created_at'>[]): Promise<TimeBlock[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('time_blocks')
+      .insert(timeBlocks)
+      .select();
+    
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Error saving time blocks:', error);
+    return [];
+  }
 };
 
 // Overlap detection utilities
@@ -218,7 +236,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
         newTimeBlocks.push(newTimeBlock);
       });
 
-      const allTimeBlocks = getTimeBlocks();
+      const allTimeBlocks = await getTimeBlocks();
       const { userOverlaps, otherUserOverlaps } = findOverlappingBlocks(newTimeBlocks, allTimeBlocks, user?.id);
 
       if (userOverlaps.length > 0) {
@@ -239,7 +257,17 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
         });
       }
 
-      saveTimeBlocks([...allTimeBlocks, ...newTimeBlocks]);
+      const savedBlocks = await saveTimeBlocks(newTimeBlocks);
+      
+      if (savedBlocks.length === 0) {
+        toast({
+          title: "Error saving schedule",
+          description: "Failed to save your schedule. Please try again.",
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
 
       // Reset form
       setFormData({

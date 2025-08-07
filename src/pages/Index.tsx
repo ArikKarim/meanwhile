@@ -26,6 +26,7 @@ interface CalendarSettings {
   [groupId: string]: {
     startHour: number;
     endHour: number;
+    weekStartDay: 'sunday' | 'monday';
   };
 }
 
@@ -79,11 +80,12 @@ const isColorTaken = (color: string, excludeUserId?: string): boolean => {
 // Time Range Form Component
 const TimeRangeForm = ({ groupId, currentSettings, onUpdate }: {
   groupId: string;
-  currentSettings: { startHour: number; endHour: number };
-  onUpdate: (groupId: string, startHour: number, endHour: number) => void;
+  currentSettings: { startHour: number; endHour: number; weekStartDay: 'sunday' | 'monday' };
+  onUpdate: (groupId: string, startHour: number, endHour: number, weekStartDay: 'sunday' | 'monday') => void;
 }) => {
   const [startHour, setStartHour] = useState(currentSettings.startHour);
   const [endHour, setEndHour] = useState(currentSettings.endHour);
+  const [weekStartDay, setWeekStartDay] = useState(currentSettings.weekStartDay);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,7 +97,7 @@ const TimeRangeForm = ({ groupId, currentSettings, onUpdate }: {
       alert('Calendar must span at least 3 hours');
       return;
     }
-    onUpdate(groupId, startHour, endHour);
+    onUpdate(groupId, startHour, endHour, weekStartDay);
   };
 
   const formatTime = (hour: number) => {
@@ -139,8 +141,22 @@ const TimeRangeForm = ({ groupId, currentSettings, onUpdate }: {
           </select>
         </div>
       </div>
+      
+      <div className="space-y-2">
+        <Label htmlFor="week-start-day">Week Starts On</Label>
+        <select
+          id="week-start-day"
+          value={weekStartDay}
+          onChange={(e) => setWeekStartDay(e.target.value as 'sunday' | 'monday')}
+          className="w-full p-2 border border-gray-300 rounded-md"
+        >
+          <option value="sunday">Sunday</option>
+          <option value="monday">Monday</option>
+        </select>
+      </div>
+      
       <div className="text-sm text-muted-foreground">
-        Current: {formatTime(currentSettings.startHour)} - {formatTime(currentSettings.endHour)}
+        Current: {formatTime(currentSettings.startHour)} - {formatTime(currentSettings.endHour)}, Week starts on {currentSettings.weekStartDay === 'sunday' ? 'Sunday' : 'Monday'}
       </div>
       <div className="flex gap-2 pt-4">
         <Button type="submit">Update Time Range</Button>
@@ -185,14 +201,14 @@ const Index = () => {
 
   // Get calendar time settings for current group
   const getGroupTimeSettings = (groupId: string) => {
-    return calendarSettings[groupId] || { startHour: 7, endHour: 21 };
+    return calendarSettings[groupId] || { startHour: 7, endHour: 21, weekStartDay: 'sunday' as const };
   };
 
   // Update calendar time settings
-  const updateTimeSettings = (groupId: string, startHour: number, endHour: number) => {
+  const updateTimeSettings = (groupId: string, startHour: number, endHour: number, weekStartDay: 'sunday' | 'monday') => {
     const newSettings = {
       ...calendarSettings,
-      [groupId]: { startHour, endHour }
+      [groupId]: { startHour, endHour, weekStartDay }
     };
     setCalendarSettings(newSettings);
     saveCalendarSettings(newSettings);
@@ -200,7 +216,7 @@ const Index = () => {
     setRefreshKey(prev => prev + 1); // Force calendar refresh
     toast({
       title: "Calendar Updated",
-      description: `Calendar time range set to ${startHour < 12 ? startHour : startHour === 12 ? 12 : startHour - 12}${startHour < 12 ? 'AM' : 'PM'} - ${endHour < 12 ? endHour : endHour === 12 ? 12 : endHour - 12}${endHour < 12 ? 'AM' : 'PM'}`,
+      description: `Calendar time range set to ${startHour < 12 ? startHour : startHour === 12 ? 12 : startHour - 12}${startHour < 12 ? 'AM' : 'PM'} - ${endHour < 12 ? endHour : endHour === 12 ? 12 : endHour - 12}${endHour < 12 ? 'AM' : 'PM'}, Week starts on ${weekStartDay === 'sunday' ? 'Sunday' : 'Monday'}`,
     });
   };
 
@@ -522,6 +538,7 @@ const Index = () => {
                       visibleUsers={viewMode === 'busy' ? visibleUsers : undefined}
                       startHour={getGroupTimeSettings(selectedGroupId).startHour}
                       endHour={getGroupTimeSettings(selectedGroupId).endHour}
+                      weekStartDay={getGroupTimeSettings(selectedGroupId).weekStartDay}
                     />
                   </div>
                 </div>

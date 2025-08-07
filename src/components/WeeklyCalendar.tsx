@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Edit3, Trash2 } from 'lucide-react';
+import { Edit3, Trash2, Copy } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface TimeBlock {
   id: string;
@@ -25,9 +26,11 @@ interface WeeklyCalendarProps {
   visibleUsers?: Set<string>;
   startHour?: number;
   endHour?: number;
+  weekStartDay?: 'sunday' | 'monday';
 }
 
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAYS_SUNDAY_START = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DAYS_MONDAY_START = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 // User color system (replaces category-based colors)
 const USER_COLORS_KEY = 'meanwhile_user_colors';
@@ -127,12 +130,66 @@ interface StoredTimeBlock {
   created_at: string;
 }
 
-const getTimeBlocks = (): StoredTimeBlock[] => {
+const getTimeBlocks = async (): Promise<StoredTimeBlock[]> => {
   try {
-    const stored = localStorage.getItem(TIME_BLOCKS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
+    const { data, error } = await supabase
+      .from('time_blocks')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching time blocks:', error);
     return [];
+  }
+};
+
+const saveTimeBlock = async (timeBlock: Omit<StoredTimeBlock, 'id' | 'created_at'>): Promise<StoredTimeBlock | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('time_blocks')
+      .insert([timeBlock])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error('Error saving time block:', error);
+    return null;
+  }
+};
+
+const updateTimeBlock = async (id: string, updates: Partial<StoredTimeBlock>): Promise<StoredTimeBlock | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('time_blocks')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error('Error updating time block:', error);
+    return null;
+  }
+};
+
+const deleteTimeBlock = async (id: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase
+      .from('time_blocks')
+      .delete()
+      .eq('id', id);
+    
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.error('Error deleting time block:', error);
+    return false;
   }
 };
 
@@ -145,11 +202,17 @@ const getUsers = (): StoredUser[] => {
   }
 };
 
-const getGroupMembers = (): GroupMember[] => {
+const getGroupMembers = async (): Promise<GroupMember[]> => {
   try {
-    const stored = localStorage.getItem(GROUP_MEMBERS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
+    const { data, error } = await supabase
+      .from('group_members')
+      .select('*')
+      .order('joined_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching group members:', error);
     return [];
   }
 };
@@ -172,7 +235,32 @@ const getDisplayName = (user: StoredUser | undefined): string => {
   return user.username;
 };
 
-const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHour = 21 }: WeeklyCalendarProps) => {
+const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHour = 21, weekStartDay = 'sunday' }: WeeklyCalendarProps) => {
+  // Get the correct days array based on week start preference
+  const DAYS = weekStartDay === 'monday' ? DAYS_MONDAY_START : DAYS_SUNDAY_START;
+  
+  // Helper function to convert UI day index to storage day index (0=Sunday, 1=Monday, etc.)
+  const getStorageDayIndex = (uiDayIndex: number): number => {
+    if (weekStartDay === 'monday') {
+      // Monday start: [Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6] -> [1,2,3,4,5,6,0]
+      return uiDayIndex === 6 ? 0 : uiDayIndex + 1;
+    } else {
+      // Sunday start: [Sun=0, Mon=1, Tue=2, Wed=3, Thu=4, Fri=5, Sat=6] -> [0,1,2,3,4,5,6]
+      return uiDayIndex;
+    }
+  };
+  
+  // Helper function to convert storage day index to UI day index
+  const getUIDayIndex = (storageDayIndex: number): number => {
+    if (weekStartDay === 'monday') {
+      // Storage [0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat] -> UI [6,0,1,2,3,4,5]
+      return storageDayIndex === 0 ? 6 : storageDayIndex - 1;
+    } else {
+      // Storage [0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat] -> UI [0,1,2,3,4,5,6]
+      return storageDayIndex;
+    }
+  };
+  
   // Generate dynamic time slots based on customizable range
   const TIME_SLOTS = Array.from({ length: (endHour - startHour) * 2 }, (_, i) => {
     const hour = Math.floor(i / 2) + startHour;
@@ -218,11 +306,12 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     show: boolean;
   }>({ day: 0, hour: 0, show: false });
   
+  const [duplicatingBlock, setDuplicatingBlock] = useState<TimeBlock | null>(null);
+  const [selectedDuplicateDays, setSelectedDuplicateDays] = useState<number[]>([]);
+  
   const { user } = useAuth();
 
-  const saveTimeBlocks = (blocks: StoredTimeBlock[]) => {
-    localStorage.setItem(TIME_BLOCKS_KEY, JSON.stringify(blocks));
-  };
+
 
   const handleEditBlock = (block: TimeBlock) => {
     setEditingBlock(block);
@@ -240,18 +329,17 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     if (!editingBlock || !user) return;
 
     try {
-      const allTimeBlocks = getTimeBlocks();
-      const updatedBlocks = allTimeBlocks.map(block => 
-        block.id === editingBlock.id 
-          ? { 
-              ...block, 
-              ...editForm,
-              color: userColors[user?.id || ''] || getUserColor(user?.id || '') // Set color based on current user color
-            }
-          : block
-      );
+      const updates = {
+        ...editForm,
+        color: userColors[user?.id || ''] || getUserColor(user?.id || '') // Set color based on current user color
+      };
       
-      saveTimeBlocks(updatedBlocks);
+      const result = await updateTimeBlock(editingBlock.id, updates);
+      
+      if (!result) {
+        throw new Error('Failed to update time block');
+      }
+      
       setEditingBlock(null);
       
       // Refresh the display
@@ -265,16 +353,75 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     if (!user) return;
 
     try {
-      const allTimeBlocks = getTimeBlocks();
-      const filteredBlocks = allTimeBlocks.filter(block => block.id !== blockId);
+      const success = await deleteTimeBlock(blockId);
       
-      saveTimeBlocks(filteredBlocks);
+      if (!success) {
+        throw new Error('Failed to delete time block');
+      }
       
       // Refresh the display
       fetchTimeBlocks();
     } catch (error) {
       console.error('Error deleting time block:', error);
     }
+  };
+
+  const handleDuplicateBlock = (block: TimeBlock) => {
+    setDuplicatingBlock(block);
+    setSelectedDuplicateDays([]);
+  };
+
+  const handleConfirmDuplicate = async () => {
+    if (!duplicatingBlock || !user || selectedDuplicateDays.length === 0) return;
+
+    try {
+      const allTimeBlocks = await getTimeBlocks();
+      const newBlocks: Promise<StoredTimeBlock | null>[] = [];
+
+      selectedDuplicateDays.forEach(dayIndex => {
+        const storageDayIndex = getStorageDayIndex(dayIndex);
+        
+        // Check if there's already an event at this time on this day for this user
+        const existingBlock = allTimeBlocks.find(block => 
+          block.user_id === user.id &&
+          block.day_of_week === storageDayIndex &&
+          block.start_time === duplicatingBlock.start_time &&
+          block.end_time === duplicatingBlock.end_time
+        );
+
+        if (!existingBlock) {
+          const newBlockData = {
+            user_id: user.id,
+            group_id: groupId,
+            label: duplicatingBlock.label,
+            day_of_week: storageDayIndex,
+            start_time: duplicatingBlock.start_time,
+            end_time: duplicatingBlock.end_time,
+            color: duplicatingBlock.color,
+            tag: duplicatingBlock.tag
+          };
+          newBlocks.push(saveTimeBlock(newBlockData));
+        }
+      });
+
+      if (newBlocks.length > 0) {
+        await Promise.all(newBlocks);
+        fetchTimeBlocks();
+      }
+
+      setDuplicatingBlock(null);
+      setSelectedDuplicateDays([]);
+    } catch (error) {
+      console.error('Error duplicating time block:', error);
+    }
+  };
+
+  const toggleDuplicateDay = (dayIndex: number) => {
+    setSelectedDuplicateDays(prev => 
+      prev.includes(dayIndex) 
+        ? prev.filter(d => d !== dayIndex)
+        : [...prev, dayIndex]
+    );
   };
 
   // Interactive calendar functions
@@ -284,7 +431,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
   };
 
-  const handleTimeSlotClick = (dayIndex: number, timeSlot: { hour: number; minute: number; time: string }, event: React.MouseEvent) => {
+  const handleTimeSlotClick = async (dayIndex: number, timeSlot: { hour: number; minute: number; time: string }, event: React.MouseEvent) => {
     if (!user || viewMode !== 'busy') return;
     
     // Use the exact time slot that was clicked
@@ -298,7 +445,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       user_id: user.id,
       group_id: groupId,
       label: 'New Event',
-      day_of_week: dayIndex,
+      day_of_week: getStorageDayIndex(dayIndex), // Convert UI day index to storage day index
       start_time: startTime,
       end_time: endTime,
       color: userColors[user.id] || getUserColor(user.id),
@@ -307,25 +454,38 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     };
     
     // Add to storage
-    const allTimeBlocks = getTimeBlocks();
-    saveTimeBlocks([...allTimeBlocks, newBlock]);
+    const savedBlock = await saveTimeBlock({
+      user_id: user.id,
+      group_id: groupId,
+      label: newBlock.label,
+      day_of_week: newBlock.day_of_week,
+      start_time: newBlock.start_time,
+      end_time: newBlock.end_time,
+      color: newBlock.color,
+      tag: newBlock.tag
+    });
+    
+    if (!savedBlock) {
+      console.error('Failed to save time block');
+      return;
+    }
     
     // Refresh display
     fetchTimeBlocks();
     
     // Open edit dialog immediately
     const blockWithDisplay = {
-      ...newBlock,
+      ...savedBlock,
       displayName: user.firstName && user.lastName 
         ? `${user.firstName} ${user.lastName.charAt(0)}`
         : user.username
     };
     setEditingBlock(blockWithDisplay);
     const formData = {
-      label: newBlock.label,
-      start_time: newBlock.start_time,
-      end_time: newBlock.end_time,
-      tag: newBlock.tag
+      label: savedBlock.label,
+      start_time: savedBlock.start_time,
+      end_time: savedBlock.end_time,
+      tag: savedBlock.tag
     };
     setEditForm(formData);
     setOriginalEditForm(formData); // Store original values for new blocks
@@ -376,19 +536,17 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     ));
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = async () => {
     if (!dragState.blockId) return;
     
     // Save the changes permanently
     const block = timeBlocks.find(b => b.id === dragState.blockId);
     if (block && block.user_id === user?.id) {
-      const allTimeBlocks = getTimeBlocks();
-      const updatedBlocks = allTimeBlocks.map(b => 
-        b.id === dragState.blockId 
-          ? { ...b, start_time: block.start_time, end_time: block.end_time }
-          : b
-      );
-      saveTimeBlocks(updatedBlocks);
+      // Update the block in storage
+      await updateTimeBlock(block.id, {
+        start_time: block.start_time,
+        end_time: block.end_time
+      });
     }
     
     setDragState({
@@ -417,9 +575,9 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     try {
       setLoading(true);
       
-      const allTimeBlocks = getTimeBlocks();
+      const allTimeBlocks = await getTimeBlocks();
       const allUsers = getUsers();
-      const groupMembers = getGroupMembers();
+      const groupMembers = await getGroupMembers();
       
       // Filter time blocks for this group
       const groupTimeBlocks = allTimeBlocks.filter(block => block.group_id === groupId);
@@ -508,8 +666,9 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     return `${displayHour}:${minutes} ${ampm}`;
   };
 
-  const getTimeBlocksForDay = (dayIndex: number) => {
-    return timeBlocks.filter(block => block.day_of_week === dayIndex);
+  const getTimeBlocksForDay = (uiDayIndex: number) => {
+    const storageDayIndex = getStorageDayIndex(uiDayIndex);
+    return timeBlocks.filter(block => block.day_of_week === storageDayIndex);
   };
 
   // Calculate overlap positions for blocks on the same day
@@ -804,6 +963,17 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                         <Button
                           size="sm"
                           variant="ghost"
+                          className="h-5 w-5 p-0 bg-black/20 hover:bg-blue-500/80 text-white"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDuplicateBlock(block);
+                          }}
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
                           className="h-5 w-5 p-0 bg-black/20 hover:bg-red-500/80 text-white"
                           onClick={(e) => {
                             e.stopPropagation();
@@ -927,6 +1097,74 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                 </Button>
               </div>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Duplicate Event Dialog */}
+      <Dialog open={!!duplicatingBlock} onOpenChange={(open) => {
+        if (!open) {
+          setDuplicatingBlock(null);
+          setSelectedDuplicateDays([]);
+        }
+      }}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Duplicate Event</DialogTitle>
+            <DialogDescription>
+              Select the days you want to copy "{duplicatingBlock?.label}" to.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">
+              Original: {duplicatingBlock && DAYS[getUIDayIndex(duplicatingBlock.day_of_week)]} {duplicatingBlock?.start_time} - {duplicatingBlock?.end_time}
+            </div>
+            
+            <div className="grid grid-cols-4 gap-2">
+              {DAYS.map((day, index) => {
+                const isOriginalDay = duplicatingBlock && getUIDayIndex(duplicatingBlock.day_of_week) === index;
+                const isSelected = selectedDuplicateDays.includes(index);
+                
+                return (
+                  <Button
+                    key={day}
+                    variant={isSelected ? "default" : "outline"}
+                    size="sm"
+                    disabled={isOriginalDay}
+                    onClick={() => toggleDuplicateDay(index)}
+                    className={`${isOriginalDay ? 'opacity-50' : ''}`}
+                  >
+                    {day}
+                    {isOriginalDay && ' ✓'}
+                  </Button>
+                );
+              })}
+            </div>
+            
+            {selectedDuplicateDays.length > 0 && (
+              <div className="text-sm text-green-600">
+                Will create {selectedDuplicateDays.length} new event{selectedDuplicateDays.length !== 1 ? 's' : ''}
+              </div>
+            )}
+          </div>
+          
+          <div className="flex gap-2 pt-4">
+            <Button 
+              onClick={handleConfirmDuplicate} 
+              disabled={selectedDuplicateDays.length === 0}
+            >
+              Duplicate Event{selectedDuplicateDays.length !== 1 ? 's' : ''}
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setDuplicatingBlock(null);
+                setSelectedDuplicateDays([]);
+              }}
+            >
+              Cancel
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

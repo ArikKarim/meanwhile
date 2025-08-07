@@ -73,21 +73,30 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string
+          first_name: string | null
           id: string
+          last_name: string | null
+          password_hash: string | null
           updated_at: string
           user_id: string
           username: string
         }
         Insert: {
           created_at?: string
+          first_name?: string | null
           id?: string
+          last_name?: string | null
+          password_hash?: string | null
           updated_at?: string
           user_id: string
           username: string
         }
         Update: {
           created_at?: string
+          first_name?: string | null
           id?: string
+          last_name?: string | null
+          password_hash?: string | null
           updated_at?: string
           user_id?: string
           username?: string

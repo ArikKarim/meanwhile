@@ -39,22 +39,24 @@ const Landing = () => {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 font-body">
       {/* Header */}
       <header className="relative z-10 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm border-b border-slate-200 dark:border-slate-700">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <Calendar className="h-8 w-8 text-blue-600" />
-            <h1 className="text-2xl font-bold font-heading bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+        <div className="container mx-auto px-4 py-3 sm:py-4 flex items-center justify-between">
+          <div className="flex items-center space-x-2 sm:space-x-3">
+            <Calendar className="h-6 w-6 sm:h-8 sm:w-8 text-blue-600" />
+            <h1 className="text-xl sm:text-2xl font-bold font-heading bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               Meanwhile
             </h1>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             <Link to="/auth?mode=signin">
-              <Button variant="ghost" className="font-medium font-body">
+              <Button variant="ghost" size="sm" className="font-medium font-body text-sm sm:text-base hidden sm:inline-flex">
                 Log In
               </Button>
             </Link>
             <Link to="/auth?mode=signup">
-              <Button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium font-body">
-                Get Started <ArrowRight className="ml-2 h-4 w-4" />
+              <Button size="sm" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium font-body text-sm sm:text-base">
+                <span className="sm:hidden">Start</span>
+                <span className="hidden sm:inline">Get Started</span>
+                <ArrowRight className="ml-1 sm:ml-2 h-3 w-3 sm:h-4 sm:w-4" />
               </Button>
             </Link>
           </div>
@@ -62,13 +64,13 @@ const Landing = () => {
       </header>
 
       {/* Hero Section */}
-      <section className="relative py-20 px-4">
+      <section className="relative py-12 sm:py-16 md:py-20 px-4">
         <div className="container mx-auto text-center max-w-4xl">
-          <span className="trace-border inline-block mb-6 text-blue-700 font-body px-3 py-1.5 rounded-full text-xs font-medium">
+          <span className="trace-border inline-block mb-4 sm:mb-6 text-blue-700 font-body px-3 py-1.5 rounded-full text-xs font-medium">
             ✨ No email required • Sign up instantly
           </span>
           
-          <h2 className="text-5xl md:text-7xl font-bold mb-8 font-heading bg-gradient-to-r from-slate-900 via-blue-800 to-purple-800 dark:from-white dark:via-blue-200 dark:to-purple-200 bg-clip-text text-transparent leading-tight">
+          <h2 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold mb-6 sm:mb-8 font-heading bg-gradient-to-r from-slate-900 via-blue-800 to-purple-800 dark:from-white dark:via-blue-200 dark:to-purple-200 bg-clip-text text-transparent leading-tight">
             Schedule with friends,
             <br />
             <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
@@ -76,56 +78,56 @@ const Landing = () => {
             </span>
           </h2>
           
-          <p className="text-xl text-slate-600 dark:text-slate-300 mb-10 max-w-2xl mx-auto leading-relaxed font-body">
+          <p className="text-base sm:text-lg md:text-xl text-slate-600 dark:text-slate-300 mb-8 sm:mb-10 max-w-2xl mx-auto leading-relaxed font-body px-4 sm:px-0">
             Create shared weekly calendars, find free time together, and coordinate with friends without the scheduling headache.
           </p>
           
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Link to="/auth?mode=signup">
-              <Button size="lg" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold px-8 py-3 text-lg font-body">
-                Start Scheduling <ArrowRight className="ml-2 h-5 w-5" />
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center px-4 sm:px-0">
+            <Link to="/auth?mode=signup" className="w-full sm:w-auto">
+              <Button size="lg" className="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold px-6 sm:px-8 py-3 text-base sm:text-lg font-body">
+                Start Scheduling <ArrowRight className="ml-2 h-4 w-4 sm:h-5 sm:w-5" />
               </Button>
             </Link>
-            <div className="flex items-center gap-2 text-sm text-slate-500 font-body">
-              <CheckCircle className="h-4 w-4 text-green-500" />
+            <div className="flex items-center gap-2 text-xs sm:text-sm text-slate-500 font-body">
+              <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4 text-green-500" />
               Free forever • No download required
             </div>
           </div>
         </div>
         
-        {/* Floating elements */}
-        <div className="absolute top-20 left-10 opacity-20">
+        {/* Floating elements - hidden on mobile for cleaner look */}
+        <div className="hidden lg:block absolute top-20 left-10 opacity-20">
           <Calendar className="h-16 w-16 text-blue-500 animate-pulse" />
         </div>
-        <div className="absolute top-40 right-16 opacity-20">
+        <div className="hidden lg:block absolute top-40 right-16 opacity-20">
           <Users className="h-12 w-12 text-purple-500 animate-bounce" />
         </div>
-        <div className="absolute bottom-20 left-1/4 opacity-20">
+        <div className="hidden lg:block absolute bottom-20 left-1/4 opacity-20">
           <Clock className="h-10 w-10 text-pink-500 animate-pulse" />
         </div>
       </section>
 
       {/* FAQ Section */}
-      <section className="py-20 px-4">
+      <section className="py-12 sm:py-16 md:py-20 px-4">
         <div className="container mx-auto max-w-4xl">
-          <div className="text-center mb-16">
-            <h3 className="text-4xl font-bold mb-6 font-heading bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-200 bg-clip-text text-transparent">
+          <div className="text-center mb-8 sm:mb-12 md:mb-16">
+            <h3 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-4 sm:mb-6 font-heading bg-gradient-to-r from-slate-900 to-slate-700 dark:from-white dark:to-slate-200 bg-clip-text text-transparent">
               Frequently Asked Questions
             </h3>
-            <p className="text-xl text-slate-600 dark:text-slate-300 font-body">
+            <p className="text-base sm:text-lg md:text-xl text-slate-600 dark:text-slate-300 font-body px-4 sm:px-0">
               Everything you need to know about Meanwhile
             </p>
           </div>
           
           <Card className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-slate-200 dark:border-slate-700">
-            <CardContent className="p-8">
-              <Accordion type="single" collapsible className="space-y-4">
+            <CardContent className="p-4 sm:p-6 md:p-8">
+              <Accordion type="single" collapsible className="space-y-2 sm:space-y-4">
                 {faqs.map((faq, index) => (
                   <AccordionItem key={index} value={`item-${index}`} className="border-slate-200 dark:border-slate-700">
-                    <AccordionTrigger className="text-left font-semibold text-lg hover:text-blue-600 transition-colors font-heading">
+                    <AccordionTrigger className="text-left font-semibold text-base sm:text-lg hover:text-blue-600 transition-colors font-heading pr-4">
                       {faq.question}
                     </AccordionTrigger>
-                    <AccordionContent className="text-slate-600 dark:text-slate-300 text-base leading-relaxed pt-2 font-body">
+                    <AccordionContent className="text-slate-600 dark:text-slate-300 text-sm sm:text-base leading-relaxed pt-2 font-body pr-4">
                       {faq.answer}
                     </AccordionContent>
                   </AccordionItem>
@@ -137,30 +139,30 @@ const Landing = () => {
       </section>
 
       {/* CTA Section */}
-      <section className="py-20 px-4 bg-gradient-to-r from-blue-600 to-purple-600">
+      <section className="py-12 sm:py-16 md:py-20 px-4 bg-gradient-to-r from-blue-600 to-purple-600">
         <div className="container mx-auto text-center max-w-3xl">
-          <h3 className="text-4xl font-bold text-white mb-6 font-heading">
+          <h3 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-4 sm:mb-6 font-heading px-4 sm:px-0">
             Ready to simplify your group scheduling?
           </h3>
-          <p className="text-xl text-blue-100 mb-10 font-body">
+          <p className="text-base sm:text-lg md:text-xl text-blue-100 mb-8 sm:mb-10 font-body px-4 sm:px-0">
             Join your friends already coordinating schedules better with Meanwhile.
           </p>
-          <Link to="/auth?mode=signup">
-            <Button size="lg" className="bg-white text-blue-600 hover:bg-blue-50 font-semibold px-8 py-3 text-lg font-body">
-              Get Started <ArrowRight className="ml-2 h-5 w-5" />
+          <Link to="/auth?mode=signup" className="inline-block w-full sm:w-auto px-4 sm:px-0">
+            <Button size="lg" className="w-full sm:w-auto bg-white text-blue-600 hover:bg-blue-50 font-semibold px-6 sm:px-8 py-3 text-base sm:text-lg font-body">
+              Get Started <ArrowRight className="ml-2 h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
           </Link>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="py-8 px-4 bg-slate-900 text-slate-300">
+      <footer className="py-6 sm:py-8 px-4 bg-slate-900 text-slate-300">
         <div className="container mx-auto text-center">
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <Calendar className="h-6 w-6 text-blue-400" />
-            <span className="text-xl font-bold text-white font-heading">Meanwhile</span>
+          <div className="flex items-center justify-center gap-2 mb-3 sm:mb-4">
+            <Calendar className="h-5 w-5 sm:h-6 sm:w-6 text-blue-400" />
+            <span className="text-lg sm:text-xl font-bold text-white font-heading">Meanwhile</span>
           </div>
-          <p className="text-sm font-body">
+          <p className="text-xs sm:text-sm font-body">
             © 2025 Arik Karim
           </p>
         </div>

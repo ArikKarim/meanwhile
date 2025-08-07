@@ -1,1 +1,22 @@
- 
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Calendar background with better proportions for favicon -->
+  <rect x="4" y="6" width="24" height="22" rx="3" ry="3" fill="#3B82F6"/>
+  
+  <!-- Calendar rings/binding -->
+  <rect x="10" y="2" width="2" height="6" fill="#3B82F6" rx="1"/>
+  <rect x="20" y="2" width="2" height="6" fill="#3B82F6" rx="1"/>
+  
+  <!-- Calendar header area -->
+  <rect x="4" y="6" width="24" height="6" fill="#2563EB" rx="3" ry="0"/>
+  
+  <!-- Calendar header line -->
+  <line x1="4" y1="12" x2="28" y2="12" stroke="#1D4ED8" stroke-width="1"/>
+  
+  <!-- Calendar grid - optimized for small size -->
+  <rect x="8" y="16" width="3" height="3" fill="white" rx="0.5"/>
+  <rect x="14" y="16" width="3" height="3" fill="white" rx="0.5"/>
+  <rect x="20" y="16" width="3" height="3" fill="white" rx="0.5"/>
+  <rect x="8" y="21" width="3" height="3" fill="white" rx="0.5"/>
+  <rect x="14" y="21" width="3" height="3" fill="white" rx="0.5"/>
+  <rect x="20" y="21" width="3" height="3" fill="white" rx="0.5"/>
+</svg>

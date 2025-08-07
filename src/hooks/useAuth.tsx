@@ -1,4 +1,5 @@
 import { useState, useEffect, useContext, createContext } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 
 interface User {
   id: string;
@@ -17,29 +18,65 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Simple localStorage-based user management
-const USERS_KEY = 'meanwhile_users';
-const CURRENT_USER_KEY = 'meanwhile_current_user';
+// Supabase database-based user management
+const CURRENT_USER_KEY = 'meanwhile_current_user'; // Keep session in localStorage for now
 
 interface StoredUser {
   id: string;
+  user_id: string;
   username: string;
-  password: string; // In a real app, this would be hashed
-  firstName: string;
-  lastName: string;
+  password_hash: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  created_at: string;
 }
 
-const getStoredUsers = (): StoredUser[] => {
+// Simple password hashing (in production, use proper bcrypt or similar)
+const hashPassword = (password: string): string => {
+  // This is a simple hash for demo purposes - use proper hashing in production
+  return btoa(password + 'meanwhile_salt');
+};
+
+const verifyPassword = (password: string, hash: string): boolean => {
+  return hashPassword(password) === hash;
+};
+
+const getStoredUsers = async (): Promise<StoredUser[]> => {
   try {
-    const stored = localStorage.getItem(USERS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching users:', error);
     return [];
   }
 };
 
-const saveStoredUsers = (users: StoredUser[]) => {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
+const saveStoredUser = async (user: Omit<StoredUser, 'id' | 'created_at'>): Promise<StoredUser | null> => {
+  try {
+    console.log('💾 Attempting to save user to database:', { username: user.username, user_id: user.user_id });
+    
+    const { data, error } = await supabase
+      .from('profiles')
+      .insert([user])
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('❌ Database insert error:', error);
+      throw error;
+    }
+    
+    console.log('✅ User successfully saved to database:', { id: data.id, username: data.username });
+    return data;
+  } catch (error) {
+    console.error('❌ Error saving user to database:', error);
+    return null;
+  }
 };
 
 const getCurrentUser = (): User | null => {
@@ -59,83 +96,162 @@ const setCurrentUser = (user: User | null) => {
   }
 };
 
+// Migration function to move localStorage users to database
+const migrateLocalStorageUsers = async (): Promise<void> => {
+  try {
+    const localUsers = localStorage.getItem('meanwhile_users');
+    if (!localUsers) return;
+    
+    const users = JSON.parse(localUsers);
+    console.log('Migrating', users.length, 'users from localStorage to database...');
+    
+    for (const user of users) {
+      // Check if user already exists in database
+      const { data: existingUser } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', user.username)
+        .single();
+      
+      if (!existingUser) {
+        // Migrate user to database
+        await saveStoredUser({
+          user_id: user.id,
+          username: user.username,
+          password_hash: hashPassword(user.password),
+          first_name: user.firstName,
+          last_name: user.lastName
+        });
+        console.log('Migrated user:', user.username);
+      }
+    }
+    
+    // Optionally clear localStorage after migration
+    // localStorage.removeItem('meanwhile_users');
+  } catch (error) {
+    console.error('Error migrating users:', error);
+  }
+};
+
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check for existing session on app load
-    const currentUser = getCurrentUser();
-    setUser(currentUser);
-    setLoading(false);
+    const initAuth = async () => {
+      // Check for existing session on app load
+      const currentUser = getCurrentUser();
+      setUser(currentUser);
+      
+      // Run migration on first load
+      await migrateLocalStorageUsers();
+      
+      setLoading(false);
+    };
+    
+    initAuth();
   }, []);
 
   const signUp = async (username: string, password: string, firstName: string, lastName: string) => {
-    const users = getStoredUsers();
-    
-    // Check if username already exists
-    if (users.find(u => u.username.toLowerCase() === username.toLowerCase())) {
-      return { error: 'Username already exists' };
+    try {
+      // Validate inputs
+      if (username.length < 3) {
+        return { error: 'Username must be at least 3 characters long' };
+      }
+      
+      if (password.length < 4) {
+        return { error: 'Password must be at least 4 characters long' };
+      }
+
+      // Check if username already exists in database
+      const { data: existingUser } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', username.toLowerCase())
+        .single();
+
+      if (existingUser) {
+        return { error: 'Username already exists' };
+      }
+
+      // Create new user in database
+      const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      console.log('📝 Creating new user:', { userId, username: username.toLowerCase() });
+      
+      const savedUser = await saveStoredUser({
+        user_id: userId,
+        username: username.trim().toLowerCase(),
+        password_hash: hashPassword(password),
+        first_name: firstName.trim(),
+        last_name: lastName.trim()
+      });
+
+      if (!savedUser) {
+        console.error('❌ Failed to save user to database');
+        return { error: 'Failed to create user. Please try again.' };
+      }
+
+      console.log('✅ User saved to database:', { id: savedUser.id, username: savedUser.username });
+
+      // Auto sign in the new user
+      const userSession: User = {
+        id: savedUser.user_id,
+        username: savedUser.username,
+        firstName: savedUser.first_name,
+        lastName: savedUser.last_name
+      };
+      
+      setCurrentUser(userSession);
+      setUser(userSession);
+
+      return { error: null };
+    } catch (error: any) {
+      console.error('Sign up error:', error);
+      return { error: error.message || 'Failed to create account' };
     }
-
-    // Validate inputs
-    if (username.length < 3) {
-      return { error: 'Username must be at least 3 characters long' };
-    }
-    
-    if (password.length < 4) {
-      return { error: 'Password must be at least 4 characters long' };
-    }
-
-    // Create new user
-    const newUser: StoredUser = {
-      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      username: username.trim(),
-      password: password, // In a real app, hash this!
-      firstName: firstName.trim(),
-      lastName: lastName.trim()
-    };
-
-    users.push(newUser);
-    saveStoredUsers(users);
-
-    // Auto sign in the new user
-    const userSession: User = {
-      id: newUser.id,
-      username: newUser.username,
-      firstName: newUser.firstName,
-      lastName: newUser.lastName
-    };
-    
-    setCurrentUser(userSession);
-    setUser(userSession);
-
-    return { error: null };
   };
 
   const signIn = async (username: string, password: string) => {
-    const users = getStoredUsers();
-    
-    const foundUser = users.find(u => 
-      u.username.toLowerCase() === username.toLowerCase() && 
-      u.password === password
-    );
+    try {
+      console.log('🔑 Attempting login for:', username.toLowerCase());
+      
+      // Find user in database
+      const { data: foundUser, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('username', username.toLowerCase())
+        .single();
 
-    if (!foundUser) {
-      return { error: 'Invalid username or password' };
+      if (error || !foundUser) {
+        console.log('❌ User not found in database:', error?.message);
+        return { error: 'Invalid username or password' };
+      }
+
+      console.log('👤 User found in database:', { id: foundUser.id, username: foundUser.username });
+
+      // Verify password
+      if (!foundUser.password_hash || !verifyPassword(password, foundUser.password_hash)) {
+        console.log('❌ Password verification failed');
+        return { error: 'Invalid username or password' };
+      }
+
+      console.log('✅ Login successful for user:', foundUser.username);
+
+      const userSession: User = {
+        id: foundUser.user_id,
+        username: foundUser.username,
+        firstName: foundUser.first_name || '',
+        lastName: foundUser.last_name || ''
+      };
+      
+      setCurrentUser(userSession);
+      setUser(userSession);
+
+      return { error: null };
+    } catch (error: any) {
+      console.error('Sign in error:', error);
+      return { error: 'Failed to sign in. Please try again.' };
     }
-
-    const userSession: User = {
-      id: foundUser.id,
-      username: foundUser.username,
-      firstName: foundUser.firstName,
-      lastName: foundUser.lastName
-    };
-    
-    setCurrentUser(userSession);
-    setUser(userSession);
-
-    return { error: null };
   };
 
   const signOut = async () => {
