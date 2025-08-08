@@ -204,6 +204,18 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
     }
   }, [user?.id]);
 
+  // Listen for user color changes from other components
+  useEffect(() => {
+    const handleColorChange = () => {
+      if (user?.id) {
+        setUserColor(getUserColor(user.id));
+      }
+    };
+
+    window.addEventListener('userColorChanged', handleColorChange);
+    return () => window.removeEventListener('userColorChanged', handleColorChange);
+  }, [user?.id]);
+
   const getCurrentColor = () => {
     return userColor; // Always use UUID-based user color
   };
@@ -224,6 +236,14 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
     userColors[user.id] = newColor;
     saveUserColors(userColors);
     setUserColor(newColor);
+    
+    // Dispatch custom event to notify other components (same as Index.tsx)
+    window.dispatchEvent(new CustomEvent('userColorChanged'));
+    
+    toast({
+      title: "Color updated",
+      description: "Your color has been successfully updated!"
+    });
   };
 
   const handleDayToggle = (dayValue: number) => {
