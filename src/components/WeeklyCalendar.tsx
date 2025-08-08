@@ -27,6 +27,7 @@ interface WeeklyCalendarProps {
   startHour?: number;
   endHour?: number;
   weekStartDay?: 'sunday' | 'monday';
+  userColors?: UserColors;
 }
 
 const DAYS_SUNDAY_START = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -248,7 +249,7 @@ const getDisplayName = (user: StoredUser | undefined): string => {
   return user.username;
 };
 
-const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHour = 21, weekStartDay = 'sunday' }: WeeklyCalendarProps) => {
+const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHour = 21, weekStartDay = 'sunday', userColors: propUserColors }: WeeklyCalendarProps) => {
   // Get the correct days array based on week start preference
   const DAYS = weekStartDay === 'monday' ? DAYS_MONDAY_START : DAYS_SUNDAY_START;
   
@@ -288,7 +289,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
 
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [loading, setLoading] = useState(true);
-  const [userColors, setUserColors] = useState<{[userId: string]: string}>({});
+  // Use userColors from props, fallback to localStorage if not provided
+  const userColors = propUserColors || getUserColors();
   const [editingBlock, setEditingBlock] = useState<TimeBlock | null>(null);
   const [editForm, setEditForm] = useState({
     label: '',
@@ -721,14 +723,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
         const blockUser = allUsers.find(u => u.id === block.user_id);
         const displayName = getDisplayName(blockUser);
         
-        // Debug: Log user lookup
-        if (displayName === 'Unknown User') {
-          console.log('Unknown user found:', {
-            blockUserId: block.user_id,
-            blockUser,
-            allUsers: allUsers.map(u => ({ id: u.id, username: u.username }))
-          });
-        }
+        // User lookup completed
         
         return {
           ...block,
@@ -754,35 +749,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     // The data will update when changes are made through the UI
   }, [groupId]); // Don't refetch data when visibleUsers changes - just re-filter
 
-  // Monitor user color changes and update state
-  useEffect(() => {
-    const loadUserColors = () => {
-      setUserColors(getUserColors());
-    };
-
-    // Load initial colors
-    loadUserColors();
-
-    // Listen for storage changes (when user colors are updated)
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === USER_COLORS_KEY) {
-        loadUserColors();
-      }
-    };
-
-    // Listen for custom events from the color picker
-    const handleColorChange = () => {
-      loadUserColors();
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('userColorChanged', handleColorChange);
-    
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('userColorChanged', handleColorChange);
-    };
-  }, []);
+  // Note: userColors now comes from props, no need for local state management
 
   const formatTime = (time: string) => {
     const [hours, minutes] = time.split(':');
@@ -817,8 +784,25 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       // Include the current block in the overlap group
       const overlapGroup = [block, ...overlappingBlocks];
       
-      // Sort by user_id to ensure consistent positioning
-      overlapGroup.sort((a, b) => a.user_id.localeCompare(b.user_id));
+      // Sort by end time (earlier ending events get higher z-index/forward position)
+      // Then by start time as secondary sort, then by user_id for consistency
+      overlapGroup.sort((a, b) => {
+        const endTimeA = timeToMinutes(a.end_time);
+        const endTimeB = timeToMinutes(b.end_time);
+        
+        if (endTimeA !== endTimeB) {
+          return endTimeA - endTimeB; // Earlier end times first
+        }
+        
+        const startTimeA = timeToMinutes(a.start_time);
+        const startTimeB = timeToMinutes(b.start_time);
+        
+        if (startTimeA !== startTimeB) {
+          return startTimeA - startTimeB; // Earlier start times first
+        }
+        
+        return a.user_id.localeCompare(b.user_id); // Consistent fallback
+      });
       
       const column = overlapGroup.findIndex(b => b.id === block.id);
       const totalColumns = overlapGroup.length;

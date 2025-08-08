@@ -597,6 +597,7 @@ const Index = () => {
                       startHour={getGroupTimeSettings(selectedGroupId).startHour}
                       endHour={getGroupTimeSettings(selectedGroupId).endHour}
                       weekStartDay={getGroupTimeSettings(selectedGroupId).weekStartDay}
+                      userColors={userColors}
                     />
                   </div>
                 </div>
