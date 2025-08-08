@@ -173,7 +173,7 @@ const Index = () => {
   const { toast } = useToast();
   const [selectedGroupId, setSelectedGroupId] = useState<string>();
   const [viewMode, setViewMode] = useState<'busy' | 'free'>('busy');
-  const [refreshKey, setRefreshKey] = useState(0);
+  // Removed refreshKey - calendar updates automatically without forced refreshes
   const [visibleUsers, setVisibleUsers] = useState<Set<string>>(new Set());
   const [groupMembers, setGroupMembers] = useState<Array<{id: string, username: string, firstName?: string, lastName?: string}>>([]);
   const [userColor, setUserColor] = useState('#3b82f6');
@@ -213,7 +213,7 @@ const Index = () => {
     setCalendarSettings(newSettings);
     saveCalendarSettings(newSettings);
     setShowTimeSettings(false);
-    setRefreshKey(prev => prev + 1); // Force calendar refresh
+    // Calendar will automatically re-render due to props change - no need to force refresh
     toast({
       title: "Calendar Updated",
       description: `Calendar time range set to ${startHour < 12 ? startHour : startHour === 12 ? 12 : startHour - 12}${startHour < 12 ? 'AM' : 'PM'} - ${endHour < 12 ? endHour : endHour === 12 ? 12 : endHour - 12}${endHour < 12 ? 'AM' : 'PM'}, Week starts on ${weekStartDay === 'sunday' ? 'Sunday' : 'Monday'}`,
@@ -332,7 +332,8 @@ const Index = () => {
   }
 
   const handleScheduleAdded = () => {
-    setRefreshKey(prev => prev + 1);
+    // The calendar will automatically update through optimistic updates or realtime subscriptions
+    // No need to force refresh the entire component
   };
 
   return (
@@ -532,7 +533,7 @@ const Index = () => {
                   </div>
                   <div className="p-4">
                     <WeeklyCalendar 
-                      key={`${selectedGroupId}-${refreshKey}`}
+                      key={selectedGroupId} // Only re-render when group changes
                       groupId={selectedGroupId} 
                       viewMode={viewMode}
                       visibleUsers={viewMode === 'busy' ? visibleUsers : undefined}

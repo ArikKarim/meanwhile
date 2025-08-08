@@ -470,8 +470,10 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       return;
     }
     
-    // Refresh display
-    fetchTimeBlocks();
+    // Optimistically add to local state for immediate UI update
+    setTimeBlocks(prev => [...prev, savedBlock]);
+    // Then refresh to ensure consistency
+    await fetchTimeBlocks();
     
     // Open edit dialog immediately
     const blockWithDisplay = {
@@ -621,12 +623,10 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     if (!groupId) return;
 
     fetchTimeBlocks();
-
-    // Set up polling to refresh data every 5 seconds
-    const interval = setInterval(fetchTimeBlocks, 5000);
     
-    return () => clearInterval(interval);
-  }, [groupId, visibleUsers]); // Added visibleUsers as dependency
+    // Only set up realtime subscription instead of aggressive polling
+    // The data will update when changes are made through the UI
+  }, [groupId]); // Removed visibleUsers dependency to prevent unnecessary refetches
 
   // Monitor user color changes and update state
   useEffect(() => {
