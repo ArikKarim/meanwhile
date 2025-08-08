@@ -977,8 +977,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                 const { selfOverlap } = getOverlapLevel(block, timeBlocks);
                 
                 // Calculate width and left position for overlapping blocks
-                const blockWidth = block.totalColumns > 1 ? `${100 / block.totalColumns}%` : '100%';
-                const leftPosition = block.totalColumns > 1 ? `${(block.column * 100) / block.totalColumns}%` : '0%';
+                const blockWidth = block.totalColumns > 1 ? `${100 / block.totalColumns}%` : 'calc(100% - 4px)';
+                const leftPosition = block.totalColumns > 1 ? `${(block.column * 100) / block.totalColumns}%` : '2px';
                 
                 // Get current user color (dynamic)
                 const currentUserColor = userColors[block.user_id] || block.color || '#3b82f6';
@@ -1001,8 +1001,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                       width: blockWidth,
                       backgroundColor: currentUserColor,
                       minHeight: '26px',
-                      marginLeft: block.totalColumns > 1 ? '2px' : '4px',
-                      marginRight: block.totalColumns > 1 ? '2px' : '4px',
+                      marginLeft: '2px',
+                      marginRight: '2px',
                       cursor: isOwnBlock ? 'pointer' : 'default',
                       border: `1px solid ${currentUserColor}dd`,
                       padding: Math.max(height - 4, 26) < 50 ? '2px 4px' : '4px 6px', // Responsive padding
