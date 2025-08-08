@@ -848,13 +848,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
 
   // Note: userColors now comes from props, no need for local state management
 
-  const formatTime = (time: string) => {
-    const [hours, minutes] = time.split(':');
-    const hour = parseInt(hours);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const displayHour = hour % 12 || 12;
-    return `${displayHour}:${minutes} ${ampm}`;
-  };
+
 
   const getTimeBlocksForDay = (uiDayIndex: number) => {
     const storageDayIndex = getStorageDayIndex(uiDayIndex);
@@ -1161,41 +1155,39 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                       const isWide = parseInt(blockWidth.replace(/\D/g, '')) > 80 || blockWidth === 'calc(100% - 4px)';
                       const isOverlapping = block.totalColumns > 1;
                       
-                      if (blockHeight >= 70 && isWide) {
-                        // Large blocks with full content
+                      if (blockHeight >= 50 && isWide) {
+                        // Large blocks with activity name and user
                         return (
                           <>
-                            <div className="font-medium truncate text-sm">{block.label}</div>
-                            <div className="text-xs opacity-90">
-                              {formatTime(block.start_time)} - {formatTime(block.end_time)}
-                            </div>
+                            <div className="font-medium truncate text-sm leading-tight">{block.label}</div>
                             {block.displayName && (
                               <div className="text-xs opacity-75 truncate">{block.displayName}</div>
                             )}
                           </>
                         );
-                      } else if (blockHeight >= 50) {
-                        // Medium blocks
+                      } else if (blockHeight >= 35) {
+                        // Medium blocks - activity name only unless wide enough for user
                         return (
                           <>
-                            <div className="font-medium truncate text-sm leading-tight">{block.label}</div>
-                            {!isOverlapping && block.displayName && (
+                            <div className="font-medium truncate text-xs leading-tight">{block.label}</div>
+                            {!isOverlapping && isWide && block.displayName && (
                               <div className="text-xs opacity-75 truncate">{block.displayName}</div>
                             )}
                           </>
                         );
-                      } else if (blockHeight >= 35) {
-                        // Small blocks
+                      } else if (blockHeight >= 26) {
+                        // Small blocks - truncated activity name
+                        const maxLength = blockWidth === 'calc(100% - 4px)' ? 20 : 12;
                         return (
                           <div className="font-medium truncate text-xs leading-tight">
-                            {block.label.length > 15 ? `${block.label.substring(0, 15)}...` : block.label}
+                            {block.label.length > maxLength ? `${block.label.substring(0, maxLength)}...` : block.label}
                           </div>
                         );
                       } else {
-                        // Very small blocks - just initials or short text
+                        // Very small blocks - heavily truncated
                         return (
                           <div className="font-medium truncate text-xs leading-none">
-                            {block.label.length > 8 ? `${block.label.substring(0, 8)}...` : block.label}
+                            {block.label.length > 6 ? `${block.label.substring(0, 6)}...` : block.label}
                           </div>
                         );
                       }
