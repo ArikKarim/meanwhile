@@ -186,15 +186,31 @@ const Index = () => {
   const [visibleUsers, setVisibleUsers] = useState<Set<string>>(new Set());
   const [groupMembers, setGroupMembers] = useState<Array<{id: string, username: string, firstName?: string, lastName?: string}>>([]);
   const [userColor, setUserColor] = useState('#3b82f6');
+  const [userColors, setUserColors] = useState<UserColors>({});
   const [calendarSettings, setCalendarSettings] = useState<CalendarSettings>({});
   const [showTimeSettings, setShowTimeSettings] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Initialize user color
+  // Initialize user color and load all user colors
   useEffect(() => {
     if (user?.id) {
       setUserColor(getUserColor(user.id));
     }
+    // Load all user colors
+    setUserColors(getUserColors());
+  }, [user?.id]);
+
+  // Listen for user color changes and update the state
+  useEffect(() => {
+    const handleColorChange = () => {
+      setUserColors(getUserColors());
+      if (user?.id) {
+        setUserColor(getUserColor(user.id));
+      }
+    };
+
+    window.addEventListener('userColorChanged', handleColorChange);
+    return () => window.removeEventListener('userColorChanged', handleColorChange);
   }, [user?.id]);
 
   // Load calendar settings
@@ -459,7 +475,7 @@ const Index = () => {
                           <div 
                             className="w-3 h-3 rounded-full" 
                             style={{ 
-                              backgroundColor: member.id === user?.id ? '#3b82f6' : '#64748b',
+                              backgroundColor: userColors[member.id] || '#3b82f6',
                               opacity: visibleUsers.has(member.id) ? 1 : 0.3
                             }}
                           />
@@ -602,3 +618,4 @@ const Index = () => {
 };
 
 export default Index;
+
