@@ -1319,6 +1319,17 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                 className={editingBlock?.user_id !== user?.id ? 'bg-gray-50' : ''}
               />
             </div>
+            {editingBlock?.displayName && (
+              <div className="grid gap-2">
+                <Label htmlFor="edit-user">User</Label>
+                <Input
+                  id="edit-user"
+                  value={editingBlock.displayName}
+                  readOnly={true}
+                  className="bg-gray-50"
+                />
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="edit-start">Start Time</Label>
