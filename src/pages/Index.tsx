@@ -376,13 +376,9 @@ const Index = () => {
     });
   };
 
-  const toggleAllUsers = () => {
-    if (visibleUsers.size === groupMembers.length && groupMembers.length > 0) {
-      // Hide all
-      setVisibleUsers(new Set());
-    } else {
-      // Show all
-      setVisibleUsers(new Set(groupMembers.map(member => member.id)));
+  const showOnlyMe = () => {
+    if (user?.id) {
+      setVisibleUsers(new Set([user.id]));
     }
   };
 
@@ -463,20 +459,11 @@ const Index = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={toggleAllUsers}
+                      onClick={showOnlyMe}
                       className="text-xs"
                     >
-                      {visibleUsers.size === groupMembers.length ? (
-                        <>
-                          <EyeOff className="h-3 w-3 mr-1" />
-                          Hide All
-                        </>
-                      ) : (
-                        <>
-                          <Eye className="h-3 w-3 mr-1" />
-                          Show All
-                        </>
-                      )}
+                      <Eye className="h-3 w-3 mr-1" />
+                      Show Only Me
                     </Button>
                   </div>
                   <CardDescription>
