@@ -49,9 +49,33 @@ const getUserColors = (): UserColors => {
   }
 };
 
+// Predefined color palette for auto-assignment (same as Index.tsx)
+const DEFAULT_COLORS = [
+  '#3b82f6', // Blue
+  '#ef4444', // Red  
+  '#10b981', // Green
+  '#f59e0b', // Amber
+  '#8b5cf6', // Purple
+  '#ec4899', // Pink
+  '#06b6d4', // Cyan
+  '#84cc16', // Lime
+  '#f97316', // Orange
+  '#6366f1', // Indigo
+];
+
 const getUserColor = (userId: string): string => {
   const userColors = getUserColors();
-  return userColors[userId] || '#3b82f6'; // Default blue if no color set
+  if (userColors[userId]) {
+    return userColors[userId];
+  }
+  
+  // Auto-assign a color based on user ID hash
+  const hashCode = userId.split('').reduce((a, b) => {
+    a = ((a << 5) - a) + b.charCodeAt(0);
+    return a & a;
+  }, 0);
+  const colorIndex = Math.abs(hashCode) % DEFAULT_COLORS.length;
+  return DEFAULT_COLORS[colorIndex];
 };
 
 // Category options (no colors, just tags)
@@ -194,11 +218,24 @@ const deleteTimeBlock = async (id: string): Promise<boolean> => {
   }
 };
 
-const getUsers = async (): Promise<StoredUser[]> => {
+const getUsers = async (groupId?: string): Promise<StoredUser[]> => {
   try {
-    const { data: profiles, error } = await supabase
-      .from('profiles')
-      .select('id, username, first_name, last_name');
+    let query = supabase.from('profiles').select('id, username, first_name, last_name');
+    
+    // If we have a groupId, only fetch users who are in this group
+    if (groupId) {
+      const { data: groupMembers } = await supabase
+        .from('group_members')
+        .select('user_id')
+        .eq('group_id', groupId);
+      
+      if (groupMembers && groupMembers.length > 0) {
+        const memberIds = groupMembers.map(member => member.user_id);
+        query = query.in('id', memberIds);
+      }
+    }
+    
+    const { data: profiles, error } = await query;
     
     if (error) throw error;
     
@@ -700,7 +737,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       setLoading(true);
       
       const allTimeBlocks = await getTimeBlocks();
-      const allUsers = await getUsers();
+      const allUsers = await getUsers(groupId);
       const groupMembers = await getGroupMembers();
       
       // Filter time blocks for this group
@@ -723,16 +760,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
         const blockUser = allUsers.find(u => u.id === block.user_id);
         const displayName = getDisplayName(blockUser);
         
-        // Debug user lookup
-        if (!blockUser || displayName === 'Unknown User') {
-          console.log('User lookup issue:', {
-            blockUserId: block.user_id,
-            blockUser,
-            displayName,
-            allUsersCount: allUsers.length,
-            allUserIds: allUsers.map(u => u.id)
-          });
-        }
+        // User lookup completed
         
         return {
           ...block,

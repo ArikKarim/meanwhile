@@ -66,9 +66,33 @@ const getGroups = () => {
   }
 };
 
+// Predefined color palette for auto-assignment
+const DEFAULT_COLORS = [
+  '#3b82f6', // Blue
+  '#ef4444', // Red  
+  '#10b981', // Green
+  '#f59e0b', // Amber
+  '#8b5cf6', // Purple
+  '#ec4899', // Pink
+  '#06b6d4', // Cyan
+  '#84cc16', // Lime
+  '#f97316', // Orange
+  '#6366f1', // Indigo
+];
+
 const getUserColor = (userId: string): string => {
   const userColors = getUserColors();
-  return userColors[userId] || '#3b82f6'; // Default blue if no color set
+  if (userColors[userId]) {
+    return userColors[userId];
+  }
+  
+  // Auto-assign a color based on user ID hash
+  const hashCode = userId.split('').reduce((a, b) => {
+    a = ((a << 5) - a) + b.charCodeAt(0);
+    return a & a;
+  }, 0);
+  const colorIndex = Math.abs(hashCode) % DEFAULT_COLORS.length;
+  return DEFAULT_COLORS[colorIndex];
 };
 
 const isColorTaken = (color: string, excludeUserId?: string): boolean => {
@@ -203,9 +227,7 @@ const Index = () => {
   // Listen for user color changes and update the state
   useEffect(() => {
     const handleColorChange = () => {
-      const newUserColors = getUserColors();
-      console.log('User colors updated:', newUserColors);
-      setUserColors(newUserColors);
+      setUserColors(getUserColors());
       if (user?.id) {
         setUserColor(getUserColor(user.id));
       }
@@ -477,10 +499,10 @@ const Index = () => {
                           <div 
                             className="w-3 h-3 rounded-full" 
                             style={{ 
-                              backgroundColor: userColors[member.id] || '#3b82f6',
+                              backgroundColor: getUserColor(member.id),
                               opacity: visibleUsers.has(member.id) ? 1 : 0.3
                             }}
-                            title={`Color: ${userColors[member.id] || '#3b82f6'} for user ${member.id}`}
+
                           />
                           <span className={visibleUsers.has(member.id) ? '' : 'text-muted-foreground'}>
                             {getDisplayName(member)}
