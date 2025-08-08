@@ -193,11 +193,24 @@ const deleteTimeBlock = async (id: string): Promise<boolean> => {
   }
 };
 
-const getUsers = (): StoredUser[] => {
+const getUsers = async (): Promise<StoredUser[]> => {
   try {
-    const stored = localStorage.getItem(USERS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
+    const { data: profiles, error } = await supabase
+      .from('profiles')
+      .select('id, username, first_name, last_name');
+    
+    if (error) throw error;
+    
+    // Convert Supabase profiles to StoredUser format
+    return (profiles || []).map(profile => ({
+      id: profile.id,
+      username: profile.username || 'Unknown',
+      password: '', // Not needed for display
+      firstName: profile.first_name || '',
+      lastName: profile.last_name || ''
+    }));
+  } catch (error) {
+    console.error('Error fetching users:', error);
     return [];
   }
 };
@@ -685,7 +698,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       setLoading(true);
       
       const allTimeBlocks = await getTimeBlocks();
-      const allUsers = getUsers();
+      const allUsers = await getUsers();
       const groupMembers = await getGroupMembers();
       
       // Filter time blocks for this group
