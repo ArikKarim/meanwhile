@@ -714,12 +714,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
         groupMemberIds.includes(block.user_id)
       );
       
-      // Apply user visibility filter for busy mode
-      if (viewMode === 'busy' && visibleUsers && visibleUsers.size > 0) {
-        memberTimeBlocks = memberTimeBlocks.filter(block => 
-          visibleUsers.has(block.user_id)
-        );
-      }
+      // Note: User visibility filtering is now handled in getTimeBlocksForDay during rendering
       
       // Add display names to time blocks
       const blocksWithDisplayNames = memberTimeBlocks.map(block => {
@@ -746,7 +741,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     
     // Only set up realtime subscription instead of aggressive polling
     // The data will update when changes are made through the UI
-  }, [groupId]); // Removed visibleUsers dependency to prevent unnecessary refetches
+  }, [groupId]); // Don't refetch data when visibleUsers changes - just re-filter
 
   // Monitor user color changes and update state
   useEffect(() => {
@@ -788,7 +783,14 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
 
   const getTimeBlocksForDay = (uiDayIndex: number) => {
     const storageDayIndex = getStorageDayIndex(uiDayIndex);
-    return timeBlocks.filter(block => block.day_of_week === storageDayIndex);
+    let dayBlocks = timeBlocks.filter(block => block.day_of_week === storageDayIndex);
+    
+    // Apply user visibility filter for busy mode during rendering
+    if (viewMode === 'busy' && visibleUsers && visibleUsers.size > 0) {
+      dayBlocks = dayBlocks.filter(block => visibleUsers.has(block.user_id));
+    }
+    
+    return dayBlocks;
   };
 
   // Calculate overlap positions for blocks on the same day
