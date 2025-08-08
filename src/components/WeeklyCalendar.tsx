@@ -996,7 +996,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                   
                   blockWidth = `calc(100% - ${maxOffset + 8}px)`; // Subtract total offset + margins
                   leftPosition = `${2 + (block.column * offsetPerEvent)}px`;
-                  zIndex = 10 + block.column; // Higher z-index for later events
+                  zIndex = 10 + (block.totalColumns - block.column); // Higher z-index for earlier ending events
                 } else {
                   // Single event - full width
                   blockWidth = 'calc(100% - 4px)';
@@ -1028,14 +1028,14 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                       minHeight: '26px',
                       marginLeft: '0px', // Remove margins for Notion-style layout
                       marginRight: '0px',
-                      cursor: isOwnBlock ? 'pointer' : 'default',
+                      cursor: 'pointer', // All blocks are now clickable to view details
                       border: `1px solid ${currentUserColor}dd`,
                       borderRadius: '6px', // Slightly more rounded for modern look
-                      boxShadow: block.totalColumns > 1 ? '0 2px 4px rgba(0,0,0,0.1)' : '0 1px 2px rgba(0,0,0,0.05)',
+                      boxShadow: block.totalColumns > 1 ? '0 2px 6px rgba(0,0,0,0.15)' : '0 1px 3px rgba(0,0,0,0.1)',
                       padding: Math.max(height - 4, 26) < 50 ? '3px 6px' : '6px 8px', // Better padding for stacked events
                       transition: 'all 0.2s ease' // Smooth transitions for hover effects
                     }}
-                    onClick={() => isOwnBlock && handleEditBlock(block)}
+                    onClick={() => handleEditBlock(block)}
                   >
                     {/* Drag handle - move entire block */}
                     {isOwnBlock && (
@@ -1057,26 +1057,50 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                       />
                     )}
                     
-                    {Math.max(height - 4, 26) >= 50 ? (
-                      // Full content for larger blocks
-                      <>
-                        <div className="font-medium truncate">{block.label}</div>
-                        <div className="text-xs opacity-90">
-                          {formatTime(block.start_time)} - {formatTime(block.end_time)}
-                        </div>
-                        {block.displayName && (
-                          <div className="text-xs opacity-75">{block.displayName}</div>
-                        )}
-                      </>
-                    ) : (
-                      // Compact content for smaller blocks
-                      <>
-                        <div className="font-medium truncate text-xs leading-tight">{block.label}</div>
-                        {block.displayName && (
-                          <div className="text-xs opacity-75 truncate">{block.displayName}</div>
-                        )}
-                      </>
-                    )}
+                    {(() => {
+                      const blockHeight = Math.max(height - 4, 26);
+                      const isWide = parseInt(blockWidth.replace(/\D/g, '')) > 80 || blockWidth === 'calc(100% - 4px)';
+                      const isOverlapping = block.totalColumns > 1;
+                      
+                      if (blockHeight >= 70 && isWide) {
+                        // Large blocks with full content
+                        return (
+                          <>
+                            <div className="font-medium truncate text-sm">{block.label}</div>
+                            <div className="text-xs opacity-90">
+                              {formatTime(block.start_time)} - {formatTime(block.end_time)}
+                            </div>
+                            {block.displayName && (
+                              <div className="text-xs opacity-75 truncate">{block.displayName}</div>
+                            )}
+                          </>
+                        );
+                      } else if (blockHeight >= 50) {
+                        // Medium blocks
+                        return (
+                          <>
+                            <div className="font-medium truncate text-sm leading-tight">{block.label}</div>
+                            {!isOverlapping && block.displayName && (
+                              <div className="text-xs opacity-75 truncate">{block.displayName}</div>
+                            )}
+                          </>
+                        );
+                      } else if (blockHeight >= 35) {
+                        // Small blocks
+                        return (
+                          <div className="font-medium truncate text-xs leading-tight">
+                            {block.label.length > 15 ? `${block.label.substring(0, 15)}...` : block.label}
+                          </div>
+                        );
+                      } else {
+                        // Very small blocks - just initials or short text
+                        return (
+                          <div className="font-medium truncate text-xs leading-none">
+                            {block.label.length > 8 ? `${block.label.substring(0, 8)}...` : block.label}
+                          </div>
+                        );
+                      }
+                    })()}
                     
                     {/* Drag handle - bottom */}
                     {isOwnBlock && (
@@ -1182,9 +1206,14 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       }}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>Edit Activity</DialogTitle>
+            <DialogTitle>
+              {editingBlock?.user_id === user?.id ? 'Edit Activity' : 'View Activity'}
+            </DialogTitle>
             <DialogDescription>
-              Make changes to your activity. Click save when you're done.
+              {editingBlock?.user_id === user?.id 
+                ? 'Make changes to your activity. Click save when you\'re done.'
+                : 'Activity details (read-only)'
+              }
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -1195,6 +1224,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                 value={editForm.label}
                 onChange={(e) => setEditForm(prev => ({ ...prev, label: e.target.value }))}
                 placeholder="What are you doing?"
+                readOnly={editingBlock?.user_id !== user?.id}
+                className={editingBlock?.user_id !== user?.id ? 'bg-gray-50' : ''}
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -1205,6 +1236,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                   type="time"
                   value={editForm.start_time}
                   onChange={(e) => setEditForm(prev => ({ ...prev, start_time: e.target.value }))}
+                  readOnly={editingBlock?.user_id !== user?.id}
+                  className={editingBlock?.user_id !== user?.id ? 'bg-gray-50' : ''}
                 />
               </div>
               <div className="grid gap-2">
@@ -1214,14 +1247,20 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                   type="time"
                   value={editForm.end_time}
                   onChange={(e) => setEditForm(prev => ({ ...prev, end_time: e.target.value }))}
+                  readOnly={editingBlock?.user_id !== user?.id}
+                  className={editingBlock?.user_id !== user?.id ? 'bg-gray-50' : ''}
                 />
               </div>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="edit-tag">Category & Color</Label>
               <div className="flex gap-2">
-                <Select onValueChange={(value) => setEditForm(prev => ({ ...prev, tag: value }))} value={editForm.tag}>
-                  <SelectTrigger className="flex-1">
+                <Select 
+                  onValueChange={(value) => setEditForm(prev => ({ ...prev, tag: value }))} 
+                  value={editForm.tag}
+                  disabled={editingBlock?.user_id !== user?.id}
+                >
+                  <SelectTrigger className={`flex-1 ${editingBlock?.user_id !== user?.id ? 'bg-gray-50' : ''}`}>
                     <SelectValue placeholder="Select a category" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1235,15 +1274,17 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
               </div>
               
               <div className="flex gap-2 pt-4">
-                <Button type="button" onClick={handleUpdateBlock} disabled={loading}>
-                  {loading ? 'Updating...' : 'Update Block'}
-                </Button>
+                {editingBlock?.user_id === user?.id ? (
+                  <Button type="button" onClick={handleUpdateBlock} disabled={loading}>
+                    {loading ? 'Updating...' : 'Update Block'}
+                  </Button>
+                ) : null}
                 <Button 
                   type="button" 
                   variant="outline" 
                   onClick={() => setEditingBlock(null)}
                 >
-                  Cancel
+                  {editingBlock?.user_id === user?.id ? 'Cancel' : 'Close'}
                 </Button>
               </div>
             </div>
