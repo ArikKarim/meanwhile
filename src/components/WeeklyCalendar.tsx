@@ -220,44 +220,39 @@ const deleteTimeBlock = async (id: string): Promise<boolean> => {
 
 const getUsers = async (groupId?: string): Promise<StoredUser[]> => {
   try {
-    // Try to get all profiles first to see what's available
-    const { data: allProfiles, error: allError } = await supabase
-      .from('profiles')
-      .select('*');
-    
-    console.log('All profiles query result:', { data: allProfiles, error: allError });
-    
-    if (allError) {
-      console.error('Error fetching all profiles:', allError);
+    if (!groupId) {
+      console.warn('No groupId provided for getUsers');
       return [];
     }
+
+    // Use the same approach as Index.tsx - JOIN query to get group members with profiles
+    const { data: memberData, error } = await supabase
+      .from('group_members')
+      .select(`
+        user_id,
+        profiles!inner(user_id, username, first_name, last_name)
+      `)
+      .eq('group_id', groupId);
     
-    let profilesToUse = allProfiles || [];
+    console.log('Group members with profiles query result:', { data: memberData, error });
     
-    // If we have a groupId, filter to group members
-    if (groupId && allProfiles && allProfiles.length > 0) {
-      const { data: groupMembers, error: membersError } = await supabase
-        .from('group_members')
-        .select('user_id')
-        .eq('group_id', groupId);
-      
-      console.log('Group members query result:', { data: groupMembers, error: membersError });
-      
-      if (!membersError && groupMembers && groupMembers.length > 0) {
-        const memberIds = groupMembers.map(member => member.user_id);
-        profilesToUse = allProfiles.filter(profile => memberIds.includes(profile.id));
-        console.log('Filtered profiles to group members:', profilesToUse);
-      }
+    if (error) {
+      console.error('Error fetching group members with profiles:', error);
+      return [];
     }
-    
-    // Convert Supabase profiles to StoredUser format
-    // Try different possible field names
-    const convertedUsers = profilesToUse.map(profile => ({
-      id: profile.id,
-      username: profile.username || profile.user_id || 'Unknown',
+
+    if (!memberData || memberData.length === 0) {
+      console.warn('No group members found for groupId:', groupId);
+      return [];
+    }
+
+    // Convert to StoredUser format
+    const convertedUsers = memberData.map((member: any) => ({
+      id: member.user_id,
+      username: member.profiles.username || 'Unknown',
       password: '', // Not needed for display
-      firstName: profile.first_name || '',
-      lastName: profile.last_name || ''
+      firstName: member.profiles.first_name || '',
+      lastName: member.profiles.last_name || ''
     }));
     
     console.log('Final converted users:', convertedUsers);
@@ -755,9 +750,9 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       let allUsers = await getUsers(groupId);
       const groupMembers = await getGroupMembers();
       
-      // If we couldn't get users from the database, create a minimal user list from current user
+      // If we couldn't get users from the database and there's a current user, add them
       if (allUsers.length === 0 && user) {
-        console.warn('No users found from database, creating minimal user list');
+        console.warn('No group members found from database, adding current user');
         allUsers = [{
           id: user.id,
           username: user.username || 'You',
@@ -809,26 +804,19 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
         if (blockUser) {
           displayName = getDisplayName(blockUser);
         } else {
-          // Multiple fallback strategies
-          console.warn('User not found for block, trying fallbacks');
+          // User not found in database - this shouldn't happen with proper group membership
+          console.warn('User not found for block:', {
+            blockUserId: block.user_id,
+            availableUserIds: allUsers.map(u => u.id),
+            blockDetails: block
+          });
           
-          // Fallback 1: Use current user if it's their block
+          // Use current user if it's their block
           if (user && block.user_id === user.id) {
             displayName = user.firstName ? `${user.firstName}${user.lastName ? ' ' + user.lastName.charAt(0) : ''}` : user.username || 'You';
-          } 
-          // Fallback 2: Try to extract a name from the user ID pattern
-          else if (block.user_id) {
-            // If it's a UUID, generate a name from it
-            if (block.user_id.length > 10) {
-              const hash = block.user_id.split('-')[0] || block.user_id.substring(0, 8);
-              displayName = `User ${hash.substring(0, 3).toUpperCase()}`;
-            } else {
-              displayName = `User ${block.user_id}`;
-            }
-          }
-          // Fallback 3: Generic name
-          else {
-            displayName = 'Team Member';
+          } else {
+            // This indicates a data consistency issue - the user has activities but isn't in the group
+            displayName = 'Former Member';
           }
           
           console.log('Using fallback display name:', displayName);
