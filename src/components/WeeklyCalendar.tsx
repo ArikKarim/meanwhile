@@ -893,21 +893,23 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       // Include the current block in the overlap group
       const overlapGroup = [block, ...overlappingBlocks];
       
-      // Sort by end time (earlier ending events get higher z-index/forward position)
+      // Sort by duration (shortest events get higher z-index/forward position)
       // Then by start time as secondary sort, then by user_id for consistency
       overlapGroup.sort((a, b) => {
+        const startTimeA = timeToMinutes(a.start_time);
         const endTimeA = timeToMinutes(a.end_time);
-        const endTimeB = timeToMinutes(b.end_time);
+        const durationA = endTimeA - startTimeA;
         
-        if (endTimeA !== endTimeB) {
-          return endTimeA - endTimeB; // Earlier end times first
+        const startTimeB = timeToMinutes(b.start_time);
+        const endTimeB = timeToMinutes(b.end_time);
+        const durationB = endTimeB - startTimeB;
+        
+        if (durationA !== durationB) {
+          return durationA - durationB; // Shorter durations first (in front)
         }
         
-        const startTimeA = timeToMinutes(a.start_time);
-        const startTimeB = timeToMinutes(b.start_time);
-        
         if (startTimeA !== startTimeB) {
-          return startTimeA - startTimeB; // Earlier start times first
+          return startTimeA - startTimeB; // Earlier start times first as secondary sort
         }
         
         return a.user_id.localeCompare(b.user_id); // Consistent fallback
@@ -1105,7 +1107,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                   
                   blockWidth = `calc(100% - ${maxOffset + 8}px)`; // Subtract total offset + margins
                   leftPosition = `${2 + (block.column * offsetPerEvent)}px`;
-                  zIndex = 10 + (block.totalColumns - block.column); // Higher z-index for earlier ending events
+                  zIndex = 10 + (block.totalColumns - block.column); // Higher z-index for shorter duration events
                 } else {
                   // Single event - full width
                   blockWidth = 'calc(100% - 4px)';
