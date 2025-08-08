@@ -460,7 +460,7 @@ const Index = () => {
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-base flex items-center gap-2">
                       <Eye className="h-4 w-4" />
-                      Show/Hide Users
+                      Users
                     </CardTitle>
                     <Button
                       variant="outline"
@@ -566,7 +566,7 @@ const Index = () => {
                 <div className="bg-white rounded-lg border shadow-sm">
                   <div className="p-4 border-b">
                     <div className="flex items-center justify-between">
-                      <h3 className="font-medium text-base font-body">
+                      <h3 className="font-medium text-base" style={{ fontFamily: 'Instrument Serif, serif' }}>
                         Group Schedule
                       </h3>
                       <div className="flex items-center gap-3">
