@@ -41,6 +41,12 @@ const verifyPassword = (password: string, hash: string): boolean => {
   return hashPassword(password) === hash;
 };
 
+// Helper function to validate UUID format
+const isValidUUID = (id: string): boolean => {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(id);
+};
+
 const getStoredUsers = async (): Promise<StoredUser[]> => {
   try {
     const { data, error } = await supabase
@@ -114,15 +120,22 @@ const migrateLocalStorageUsers = async (): Promise<void> => {
         .single();
       
       if (!existingUser) {
-        // Migrate user to database
+        // Generate proper UUID for migrated user
+        const { data: uuidData, error: uuidError } = await supabase.rpc('generate_user_uuid');
+        if (uuidError) {
+          console.error('❌ Failed to generate UUID for migration:', uuidError);
+          continue;
+        }
+        
+        // Migrate user to database with proper UUID
         await saveStoredUser({
-          user_id: user.id,
+          user_id: uuidData,
           username: user.username,
           password_hash: hashPassword(user.password),
           first_name: user.firstName,
           last_name: user.lastName
         });
-        console.log('Migrated user:', user.username);
+        console.log('Migrated user:', user.username, 'with new UUID:', uuidData);
       }
     }
     
@@ -141,7 +154,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const initAuth = async () => {
       // Check for existing session on app load
       const currentUser = getCurrentUser();
-      setUser(currentUser);
+      
+      // Check if current user has old string-based ID (needs re-auth)
+      if (currentUser && !isValidUUID(currentUser.id)) {
+        console.log('🔄 User has old string-based ID, clearing session for re-auth');
+        setCurrentUser(null);
+        setUser(null);
+      } else {
+        setUser(currentUser);
+      }
       
       // Run migration on first load
       await migrateLocalStorageUsers();
@@ -174,8 +195,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return { error: 'Username already exists' };
       }
 
-      // Create new user in database
-      const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      // Generate proper UUID for new user
+      const { data: uuidData, error: uuidError } = await supabase.rpc('generate_user_uuid');
+      if (uuidError) {
+        console.error('❌ Failed to generate UUID:', uuidError);
+        return { error: 'Failed to create user ID. Please try again.' };
+      }
+      
+      const userId = uuidData;
       console.log('📝 Creating new user:', { userId, username: username.toLowerCase() });
       
       const savedUser = await saveStoredUser({
