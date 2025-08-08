@@ -256,8 +256,8 @@ const getUsers = async (groupId?: string): Promise<StoredUser[]> => {
       id: profile.id,
       username: profile.username || profile.user_id || 'Unknown',
       password: '', // Not needed for display
-      firstName: profile.first_name || profile.firstName || '',
-      lastName: profile.last_name || profile.lastName || ''
+      firstName: profile.first_name || '',
+      lastName: profile.last_name || ''
     }));
     
     console.log('Final converted users:', convertedUsers);
@@ -409,7 +409,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     try {
       const updates = {
         ...editForm,
-        color: userColors[user?.id || ''] || getUserColor(user?.id || '') // Set color based on current user color
+        color: userColors[user?.id || ''] || getUserColor(user?.id || '') // Always use UUID-based color for consistency
       };
       
       const result = await updateTimeBlock(editingBlock.id, updates);
@@ -752,8 +752,20 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       setLoading(true);
       
       const allTimeBlocks = await getTimeBlocks();
-      const allUsers = await getUsers(groupId);
+      let allUsers = await getUsers(groupId);
       const groupMembers = await getGroupMembers();
+      
+      // If we couldn't get users from the database, create a minimal user list from current user
+      if (allUsers.length === 0 && user) {
+        console.warn('No users found from database, creating minimal user list');
+        allUsers = [{
+          id: user.id,
+          username: user.username || 'You',
+          firstName: user.firstName || '',
+          lastName: user.lastName || '',
+          password: ''
+        }];
+      }
       
       // Debug: Log fetched data
       console.log('Fetched data:', {
@@ -761,6 +773,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
         timeBlocksCount: allTimeBlocks.length,
         usersCount: allUsers.length,
         groupMembersCount: groupMembers.length,
+        currentUser: user,
         allUsers: allUsers.map(u => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, username: u.username })),
         timeBlockUserIds: allTimeBlocks.map(block => block.user_id).filter((id, index, arr) => arr.indexOf(id) === index)
       });
@@ -796,9 +809,29 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
         if (blockUser) {
           displayName = getDisplayName(blockUser);
         } else {
-          // Fallback: try to get user info from current user or a default
-          console.warn('User not found for block, using fallback');
-          displayName = 'Team Member'; // Better than "Unknown User"
+          // Multiple fallback strategies
+          console.warn('User not found for block, trying fallbacks');
+          
+          // Fallback 1: Use current user if it's their block
+          if (user && block.user_id === user.id) {
+            displayName = user.firstName ? `${user.firstName}${user.lastName ? ' ' + user.lastName.charAt(0) : ''}` : user.username || 'You';
+          } 
+          // Fallback 2: Try to extract a name from the user ID pattern
+          else if (block.user_id) {
+            // If it's a UUID, generate a name from it
+            if (block.user_id.length > 10) {
+              const hash = block.user_id.split('-')[0] || block.user_id.substring(0, 8);
+              displayName = `User ${hash.substring(0, 3).toUpperCase()}`;
+            } else {
+              displayName = `User ${block.user_id}`;
+            }
+          }
+          // Fallback 3: Generic name
+          else {
+            displayName = 'Team Member';
+          }
+          
+          console.log('Using fallback display name:', displayName);
         }
         
         return {
@@ -1080,8 +1113,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                   zIndex = 10;
                 }
                 
-                // Get current user color (dynamic)
-                const currentUserColor = userColors[block.user_id] || block.color || '#3b82f6';
+                // Get current user color (always use UUID-based color for consistency)
+                const currentUserColor = userColors[block.user_id] || getUserColor(block.user_id);
                 
                 // Only show warning for personal overlaps (same user)
                 const showWarning = selfOverlap;

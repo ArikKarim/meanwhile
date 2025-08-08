@@ -34,9 +34,33 @@ const saveUserColors = (colors: UserColors) => {
   localStorage.setItem(USER_COLORS_KEY, JSON.stringify(colors));
 };
 
+// Predefined color palette for auto-assignment (same as other components)
+const DEFAULT_COLORS = [
+  '#3b82f6', // Blue
+  '#ef4444', // Red  
+  '#10b981', // Green
+  '#f59e0b', // Amber
+  '#8b5cf6', // Purple
+  '#ec4899', // Pink
+  '#06b6d4', // Cyan
+  '#84cc16', // Lime
+  '#f97316', // Orange
+  '#6366f1', // Indigo
+];
+
 const getUserColor = (userId: string): string => {
   const userColors = getUserColors();
-  return userColors[userId] || '#3b82f6'; // Default blue if no color set
+  if (userColors[userId]) {
+    return userColors[userId];
+  }
+  
+  // Auto-assign a color based on user ID hash (same algorithm as other components)
+  const hashCode = userId.split('').reduce((a, b) => {
+    a = ((a << 5) - a) + b.charCodeAt(0);
+    return a & a;
+  }, 0);
+  const colorIndex = Math.abs(hashCode) % DEFAULT_COLORS.length;
+  return DEFAULT_COLORS[colorIndex];
 };
 
 const isColorTaken = (color: string, excludeUserId?: string): boolean => {
@@ -161,7 +185,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
   const { user } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  const [customColor, setCustomColor] = useState('');
+
 
   const [formData, setFormData] = useState({
     label: '',
@@ -181,7 +205,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
   }, [user?.id]);
 
   const getCurrentColor = () => {
-    return customColor || userColor;
+    return userColor; // Always use UUID-based user color
   };
 
   const updateUserColor = (newColor: string) => {
@@ -278,7 +302,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
         tag: 'class',
         selectedDays: []
       });
-      setCustomColor('');
+      
 
       toast({
         title: "Schedule added!",
@@ -367,7 +391,6 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
             <div className="flex gap-2">
               <Select value={formData.tag} onValueChange={(value) => {
                 setFormData(prev => ({ ...prev, tag: value }));
-                setCustomColor(''); // Reset custom color when category changes
               }}>
                 <SelectTrigger className="flex-1">
                   <SelectValue />
@@ -404,9 +427,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
                 />
               </div>
             </div>
-            {customColor && (
-              <p className="text-xs text-muted-foreground">Using custom color override</p>
-            )}
+
           </div>
 
           <div className="space-y-2">
