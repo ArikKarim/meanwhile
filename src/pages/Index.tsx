@@ -78,10 +78,11 @@ const isColorTaken = (color: string, excludeUserId?: string): boolean => {
 };
 
 // Time Range Form Component
-const TimeRangeForm = ({ groupId, currentSettings, onUpdate }: {
+const TimeRangeForm = ({ groupId, currentSettings, onUpdate, readOnly = false }: {
   groupId: string;
   currentSettings: { startHour: number; endHour: number; weekStartDay: 'sunday' | 'monday' };
-  onUpdate: (groupId: string, startHour: number, endHour: number, weekStartDay: 'sunday' | 'monday') => void;
+  onUpdate?: (groupId: string, startHour: number, endHour: number, weekStartDay: 'sunday' | 'monday') => void;
+  readOnly?: boolean;
 }) => {
   const [startHour, setStartHour] = useState(currentSettings.startHour);
   const [endHour, setEndHour] = useState(currentSettings.endHour);
@@ -97,7 +98,9 @@ const TimeRangeForm = ({ groupId, currentSettings, onUpdate }: {
       alert('Calendar must span at least 3 hours');
       return;
     }
-    onUpdate(groupId, startHour, endHour, weekStartDay);
+    if (!readOnly && onUpdate) {
+      onUpdate(groupId, startHour, endHour, weekStartDay);
+    }
   };
 
   const formatTime = (hour: number) => {
@@ -116,7 +119,8 @@ const TimeRangeForm = ({ groupId, currentSettings, onUpdate }: {
             id="start-hour"
             value={startHour}
             onChange={(e) => setStartHour(Number(e.target.value))}
-            className="w-full p-2 border border-gray-300 rounded-md"
+            disabled={readOnly}
+            className="w-full p-2 border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {Array.from({ length: 24 }, (_, i) => (
               <option key={i} value={i}>
@@ -131,7 +135,8 @@ const TimeRangeForm = ({ groupId, currentSettings, onUpdate }: {
             id="end-hour"
             value={endHour}
             onChange={(e) => setEndHour(Number(e.target.value))}
-            className="w-full p-2 border border-gray-300 rounded-md"
+            disabled={readOnly}
+            className="w-full p-2 border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {Array.from({ length: 24 }, (_, i) => (
               <option key={i} value={i}>
@@ -148,7 +153,8 @@ const TimeRangeForm = ({ groupId, currentSettings, onUpdate }: {
           id="week-start-day"
           value={weekStartDay}
           onChange={(e) => setWeekStartDay(e.target.value as 'sunday' | 'monday')}
-          className="w-full p-2 border border-gray-300 rounded-md"
+          disabled={readOnly}
+          className="w-full p-2 border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <option value="sunday">Sunday</option>
           <option value="monday">Monday</option>
@@ -158,12 +164,14 @@ const TimeRangeForm = ({ groupId, currentSettings, onUpdate }: {
       <div className="text-sm text-muted-foreground">
         Current: {formatTime(currentSettings.startHour)} - {formatTime(currentSettings.endHour)}, Week starts on {currentSettings.weekStartDay === 'sunday' ? 'Sunday' : 'Monday'}
       </div>
-      <div className="flex gap-2 pt-4">
-        <Button type="submit">Update Time Range</Button>
-        <Button type="button" variant="outline" onClick={() => {}}>
-          Cancel
-        </Button>
-      </div>
+      {!readOnly && (
+        <div className="flex gap-2 pt-4">
+          <Button type="submit">Update Time Range</Button>
+          <Button type="button" variant="outline" onClick={() => {}}>
+            Cancel
+          </Button>
+        </div>
+      )}
     </form>
   );
 };
@@ -179,6 +187,7 @@ const Index = () => {
   const [userColor, setUserColor] = useState('#3b82f6');
   const [calendarSettings, setCalendarSettings] = useState<CalendarSettings>({});
   const [showTimeSettings, setShowTimeSettings] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   // Initialize user color
   useEffect(() => {
@@ -193,10 +202,22 @@ const Index = () => {
   }, []);
 
   // Check if current user is group admin (creator)
-  const isGroupAdmin = (groupId: string): boolean => {
-    const groups = getGroups();
-    const group = groups.find(g => g.id === groupId);
-    return group?.created_by === user?.id;
+  const isGroupAdmin = async (groupId: string): Promise<boolean> => {
+    if (!user?.id || !groupId) return false;
+    
+    try {
+      const { data: group, error } = await supabase
+        .from('groups')
+        .select('created_by')
+        .eq('id', groupId)
+        .single();
+      
+      if (error) return false;
+      return group?.created_by === user.id;
+    } catch (error) {
+      console.error('Error checking admin status:', error);
+      return false;
+    }
   };
 
   // Get calendar time settings for current group
@@ -286,6 +307,20 @@ const Index = () => {
       setVisibleUsers(new Set());
     }
   }, [selectedGroupId]);
+
+  // Check admin status when group changes
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      if (selectedGroupId) {
+        const adminStatus = await isGroupAdmin(selectedGroupId);
+        setIsAdmin(adminStatus);
+      } else {
+        setIsAdmin(false);
+      }
+    };
+    
+    checkAdminStatus();
+  }, [selectedGroupId, user?.id]);
 
   const toggleUserVisibility = (userId: string) => {
     setVisibleUsers(prev => {
@@ -496,8 +531,8 @@ const Index = () => {
                         Group Schedule
                       </h3>
                       <div className="flex items-center gap-3">
-                        {/* Time Settings Button (for admin) */}
-                        {isGroupAdmin(selectedGroupId) && (
+                        {/* Time Settings Button */}
+                        {selectedGroupId && (
                           <Dialog open={showTimeSettings} onOpenChange={setShowTimeSettings}>
                             <DialogTrigger asChild>
                               <Button variant="outline" size="sm" className="h-8">
@@ -509,13 +544,17 @@ const Index = () => {
                               <DialogHeader>
                                 <DialogTitle>Calendar Time Range</DialogTitle>
                                 <DialogDescription>
-                                  Set the calendar time range for all group members.
+                                  {isAdmin 
+                                    ? "Set the calendar time range for all group members."
+                                    : "View the current calendar time range settings."
+                                  }
                                 </DialogDescription>
                               </DialogHeader>
                               <TimeRangeForm 
                                 groupId={selectedGroupId}
                                 currentSettings={getGroupTimeSettings(selectedGroupId)}
-                                onUpdate={updateTimeSettings}
+                                onUpdate={isAdmin ? updateTimeSettings : undefined}
+                                readOnly={!isAdmin}
                               />
                             </DialogContent>
                           </Dialog>
