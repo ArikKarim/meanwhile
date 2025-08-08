@@ -951,21 +951,6 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                     </span>
                   </div>
                 )}
-                {timeSlot.minute === 15 && (
-                  <div className="text-right text-xs leading-none text-slate-400">
-                    <div>:15</div>
-                  </div>
-                )}
-                {timeSlot.minute === 30 && (
-                  <div className="text-right text-xs leading-none text-slate-500">
-                    <div>:30</div>
-                  </div>
-                )}
-                {timeSlot.minute === 45 && (
-                  <div className="text-right text-xs leading-none text-slate-400">
-                    <div>:45</div>
-                  </div>
-                )}
               </div>
             ))}
           </div>
