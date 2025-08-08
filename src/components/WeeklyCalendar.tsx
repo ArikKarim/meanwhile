@@ -943,7 +943,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                 'border-t border-slate-200'
               }`}>
                 {timeSlot.minute === 0 && (
-                  <div className="text-right text-xs leading-none -mt-2">
+                  <div className="text-right text-xs leading-none pt-1">
                     {timeSlot.hour > 12 ? timeSlot.hour - 12 : timeSlot.hour === 0 ? 12 : timeSlot.hour}
                     <span className="text-xs opacity-70">
                       {timeSlot.hour >= 12 ? 'PM' : 'AM'}
