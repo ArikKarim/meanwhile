@@ -261,11 +261,16 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     }
   };
   
-  // Generate dynamic time slots based on customizable range
-  const TIME_SLOTS = Array.from({ length: (endHour - startHour) * 2 }, (_, i) => {
-    const hour = Math.floor(i / 2) + startHour;
-    const minute = (i % 2) * 30;
-    return { hour, minute, time: `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}` };
+  // Generate dynamic time slots based on customizable range with 15-minute intervals
+  const TIME_SLOTS = Array.from({ length: (endHour - startHour) * 4 }, (_, i) => {
+    const hour = Math.floor(i / 4) + startHour;
+    const minute = (i % 4) * 15;
+    return { 
+      hour, 
+      minute, 
+      time: `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`,
+      isQuarterHour: minute % 30 === 15 // Mark quarter-hour slots
+    };
   });
 
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
@@ -288,16 +293,22 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
   // New interactive features state
   const [dragState, setDragState] = useState<{
     blockId: string | null;
-    dragType: 'top' | 'bottom' | null;
+    dragType: 'top' | 'bottom' | 'move' | null;
+    startX: number;
     startY: number;
     originalStart: string;
     originalEnd: string;
+    originalDay: number;
+    isDuplicating: boolean;
   }>({
     blockId: null,
     dragType: null,
+    startX: 0,
     startY: 0,
     originalStart: '',
-    originalEnd: ''
+    originalEnd: '',
+    originalDay: 0,
+    isDuplicating: false
   });
   
   const [showQuickCreate, setShowQuickCreate] = useState<{
@@ -342,8 +353,12 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       
       setEditingBlock(null);
       
-      // Refresh the display
-      fetchTimeBlocks();
+      // Optimistically update local state instead of refetching
+      setTimeBlocks(prev => prev.map(block => 
+        block.id === editingBlock.id 
+          ? { ...block, ...updates, displayName: block.displayName }
+          : block
+      ));
     } catch (error) {
       console.error('Error updating time block:', error);
     }
@@ -359,8 +374,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
         throw new Error('Failed to delete time block');
       }
       
-      // Refresh the display
-      fetchTimeBlocks();
+      // Optimistically remove from local state instead of refetching
+      setTimeBlocks(prev => prev.filter(block => block.id !== blockId));
     } catch (error) {
       console.error('Error deleting time block:', error);
     }
@@ -405,8 +420,10 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       });
 
       if (newBlocks.length > 0) {
-        await Promise.all(newBlocks);
-        fetchTimeBlocks();
+        const results = await Promise.all(newBlocks);
+        // Optimistically add the new blocks to local state
+        const validResults = results.filter(result => result !== null);
+        setTimeBlocks(prev => [...prev, ...validResults]);
       }
 
       setDuplicatingBlock(null);
@@ -472,8 +489,6 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     
     // Optimistically add to local state for immediate UI update
     setTimeBlocks(prev => [...prev, savedBlock]);
-    // Then refresh to ensure consistency
-    await fetchTimeBlocks();
     
     // Open edit dialog immediately
     const blockWithDisplay = {
@@ -493,7 +508,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     setOriginalEditForm(formData); // Store original values for new blocks
   };
 
-  const handleMouseDown = (blockId: string, dragType: 'top' | 'bottom', event: React.MouseEvent) => {
+  const handleMouseDown = (blockId: string, dragType: 'top' | 'bottom' | 'move', event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
     
@@ -503,60 +518,152 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     setDragState({
       blockId,
       dragType,
+      startX: event.clientX,
       startY: event.clientY,
       originalStart: block.start_time,
-      originalEnd: block.end_time
+      originalEnd: block.end_time,
+      originalDay: block.day_of_week,
+      isDuplicating: event.ctrlKey || event.metaKey // Ctrl/Cmd for duplication
     });
   };
 
   const handleMouseMove = (event: MouseEvent) => {
     if (!dragState.blockId || !dragState.dragType) return;
     
-    const deltaY = event.clientY - dragState.startY;
-    const deltaMinutes = Math.round((deltaY / 30) * 30); // 30px = 30 minutes
-    
-    // Snap to 30-minute increments (simpler and more predictable)
-    const snappedDeltaMinutes = Math.round(deltaMinutes / 30) * 30;
-    
     const block = timeBlocks.find(b => b.id === dragState.blockId);
     if (!block) return;
     
-    let newStart = timeToMinutes(dragState.originalStart);
-    let newEnd = timeToMinutes(dragState.originalEnd);
-    
-    if (dragState.dragType === 'top') {
-      newStart = Math.max(startHour * 60, Math.min(newStart + snappedDeltaMinutes, newEnd - 30)); // Min 30 min duration
+    if (dragState.dragType === 'move') {
+      // Handle moving entire block across days and times
+      const deltaX = event.clientX - dragState.startX;
+      const deltaY = event.clientY - dragState.startY;
+      
+      // Calculate day shift (assuming each day column is roughly 120px wide)
+      const dayShift = Math.round(deltaX / 120);
+      const newDay = Math.max(0, Math.min(6, dragState.originalDay + dayShift));
+      
+      // Calculate time shift (30px = 15 minutes for finer control)
+      const timeShiftMinutes = Math.round((deltaY / 30) * 15);
+      const snappedTimeShift = Math.round(timeShiftMinutes / 15) * 15; // Snap to 15-minute intervals
+      
+      let newStart = timeToMinutes(dragState.originalStart) + snappedTimeShift;
+      let newEnd = timeToMinutes(dragState.originalEnd) + snappedTimeShift;
+      
+      // Constrain to calendar hours
+      if (newStart < startHour * 60) {
+        const adjustment = startHour * 60 - newStart;
+        newStart += adjustment;
+        newEnd += adjustment;
+      }
+      if (newEnd > endHour * 60) {
+        const adjustment = newEnd - endHour * 60;
+        newStart -= adjustment;
+        newEnd -= adjustment;
+      }
+      
+      // Update the time block temporarily (visual feedback)
+      setTimeBlocks(prev => prev.map(b => 
+        b.id === dragState.blockId 
+          ? { ...b, day_of_week: newDay, start_time: minutesToTime(newStart), end_time: minutesToTime(newEnd) }
+          : b
+      ));
     } else {
-      newEnd = Math.min(endHour * 60, Math.max(newEnd + snappedDeltaMinutes, newStart + 30)); // Min 30 min duration
+      // Handle resizing (top/bottom drag)
+      const deltaY = event.clientY - dragState.startY;
+      const timeShiftMinutes = Math.round((deltaY / 30) * 15); // 30px = 15 minutes for finer control
+      const snappedDeltaMinutes = Math.round(timeShiftMinutes / 15) * 15; // Snap to 15-minute intervals
+      
+      let newStart = timeToMinutes(dragState.originalStart);
+      let newEnd = timeToMinutes(dragState.originalEnd);
+      
+      if (dragState.dragType === 'top') {
+        newStart = Math.max(startHour * 60, Math.min(newStart + snappedDeltaMinutes, newEnd - 15)); // Min 15 min duration
+      } else {
+        newEnd = Math.min(endHour * 60, Math.max(newEnd + snappedDeltaMinutes, newStart + 15)); // Min 15 min duration
+      }
+      
+      // Update the time block temporarily (visual feedback)
+      setTimeBlocks(prev => prev.map(b => 
+        b.id === dragState.blockId 
+          ? { ...b, start_time: minutesToTime(newStart), end_time: minutesToTime(newEnd) }
+          : b
+      ));
     }
-    
-    // Update the time block temporarily (visual feedback)
-    setTimeBlocks(prev => prev.map(b => 
-      b.id === dragState.blockId 
-        ? { ...b, start_time: minutesToTime(newStart), end_time: minutesToTime(newEnd) }
-        : b
-    ));
   };
 
   const handleMouseUp = async () => {
     if (!dragState.blockId) return;
     
-    // Save the changes permanently
     const block = timeBlocks.find(b => b.id === dragState.blockId);
     if (block && block.user_id === user?.id) {
-      // Update the block in storage
-      await updateTimeBlock(block.id, {
-        start_time: block.start_time,
-        end_time: block.end_time
-      });
+      try {
+        if (dragState.isDuplicating && dragState.dragType === 'move') {
+          // Create a duplicate instead of moving
+          const duplicateBlock = await saveTimeBlock({
+            user_id: user.id,
+            group_id: groupId,
+            label: block.label,
+            day_of_week: block.day_of_week,
+            start_time: block.start_time,
+            end_time: block.end_time,
+            color: block.color,
+            tag: block.tag
+          });
+          
+          if (duplicateBlock) {
+            // Add the duplicate to local state
+            setTimeBlocks(prev => [...prev, duplicateBlock]);
+          }
+          
+          // Reset original block position
+          setTimeBlocks(prev => prev.map(b => 
+            b.id === dragState.blockId 
+              ? { ...b, 
+                  day_of_week: dragState.originalDay, 
+                  start_time: dragState.originalStart, 
+                  end_time: dragState.originalEnd 
+                }
+              : b
+          ));
+        } else {
+          // Regular move/resize - update the existing block
+          if (dragState.dragType === 'move') {
+            await updateTimeBlock(block.id, {
+              day_of_week: block.day_of_week,
+              start_time: block.start_time,
+              end_time: block.end_time
+            });
+          } else {
+            await updateTimeBlock(block.id, {
+              start_time: block.start_time,
+              end_time: block.end_time
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error handling drag operation:', error);
+        // Reset to original position on error
+        setTimeBlocks(prev => prev.map(b => 
+          b.id === dragState.blockId 
+            ? { ...b, 
+                day_of_week: dragState.originalDay, 
+                start_time: dragState.originalStart, 
+                end_time: dragState.originalEnd 
+              }
+            : b
+        ));
+      }
     }
     
     setDragState({
       blockId: null,
       dragType: null,
+      startX: 0,
       startY: 0,
       originalStart: '',
-      originalEnd: ''
+      originalEnd: '',
+      originalDay: 0,
+      isDuplicating: false
     });
   };
 
@@ -707,8 +814,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     const startMinutes = (startHourNum - startHour) * 60 + startMin;
     const endMinutes = (endHourNum - startHour) * 60 + endMin;
     
-    const top = (startMinutes / 30) * 30; // 30px per 30-minute slot
-    const height = ((endMinutes - startMinutes) / 30) * 30; // 30px per 30-minute slot
+    const top = (startMinutes / 15) * 15; // 15px per 15-minute slot
+    const height = ((endMinutes - startMinutes) / 15) * 15; // 15px per 15-minute slot
     
     return { top, height };
   };
@@ -831,8 +938,10 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
           {/* Time Column */}
           <div className="bg-slate-50/50 border-r border-slate-200 w-16">
             {TIME_SLOTS.map((timeSlot, index) => (
-              <div key={timeSlot.time} className={`h-[30px] text-xs text-slate-600 flex items-center justify-end pr-2 ${
-                timeSlot.minute === 0 ? 'border-t border-slate-300 font-medium' : 'border-t border-slate-100'
+              <div key={timeSlot.time} className={`h-[15px] text-xs text-slate-600 flex items-center justify-end pr-2 ${
+                timeSlot.minute === 0 ? 'border-t border-slate-300 font-medium' : 
+                timeSlot.minute === 30 ? 'border-t border-slate-200' : 
+                'border-t border-slate-100 border-dashed'
               }`}>
                 {timeSlot.minute === 0 && (
                   <div className="text-right text-xs leading-none">
@@ -840,6 +949,21 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                     <span className="text-xs opacity-70">
                       {timeSlot.hour >= 12 ? 'PM' : 'AM'}
                     </span>
+                  </div>
+                )}
+                {timeSlot.minute === 15 && (
+                  <div className="text-right text-xs leading-none text-slate-400">
+                    <div>:15</div>
+                  </div>
+                )}
+                {timeSlot.minute === 30 && (
+                  <div className="text-right text-xs leading-none text-slate-500">
+                    <div>:30</div>
+                  </div>
+                )}
+                {timeSlot.minute === 45 && (
+                  <div className="text-right text-xs leading-none text-slate-400">
+                    <div>:45</div>
                   </div>
                 )}
               </div>
@@ -853,8 +977,10 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
               {TIME_SLOTS.map((timeSlot, index) => (
                 <div 
                   key={timeSlot.time} 
-                  className={`h-[30px] border-t border-slate-100 hover:bg-blue-50/40 transition-colors cursor-pointer group ${
-                    timeSlot.minute === 0 ? 'border-t-slate-200' : ''
+                  className={`h-[15px] border-t hover:bg-blue-50/40 transition-colors cursor-pointer group ${
+                    timeSlot.minute === 0 ? 'border-t-slate-300' : 
+                    timeSlot.minute === 30 ? 'border-t-slate-200' : 
+                    'border-t-slate-100 border-dashed'
                   }`}
                   onClick={(e) => handleTimeSlotClick(dayIndex, timeSlot, e)}
                   title={`Click to create event at ${timeSlot.time}`}
@@ -903,6 +1029,17 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                     }}
                     onClick={() => isOwnBlock && handleEditBlock(block)}
                   >
+                    {/* Drag handle - move entire block */}
+                    {isOwnBlock && (
+                      <div
+                        className="absolute top-1 left-1 w-4 h-4 bg-white/40 opacity-0 group-hover:opacity-100 cursor-move transition-opacity rounded-sm"
+                        onMouseDown={(e) => handleMouseDown(block.id, 'move', e)}
+                        title="Drag to move block (Ctrl+drag to duplicate)"
+                      >
+                        <div className="w-full h-full flex items-center justify-center text-black/60 text-xs">⋮⋮</div>
+                      </div>
+                    )}
+                    
                     {/* Drag handle - top */}
                     {isOwnBlock && (
                       <div
