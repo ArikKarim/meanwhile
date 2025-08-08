@@ -353,7 +353,7 @@ const Index = () => {
   };
 
   const toggleAllUsers = () => {
-    if (visibleUsers.size === groupMembers.length) {
+    if (visibleUsers.size === groupMembers.length && groupMembers.length > 0) {
       // Hide all
       setVisibleUsers(new Set());
     } else {

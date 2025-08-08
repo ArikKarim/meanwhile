@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
-import { Users, Copy, Trash2, Crown, User } from 'lucide-react';
+import { Users, Copy, Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 
 interface Group {
@@ -16,7 +16,6 @@ interface Group {
   name: string;
   code: string;
   created_by: string;
-  member_count?: number;
 }
 
 interface GroupManagerProps {
@@ -183,18 +182,12 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
       
       const userGroups = allGroups.filter(group => userMemberGroups.includes(group.id));
       
-      // Add member counts
-      const groupsWithCounts = userGroups.map(group => ({
-        ...group,
-        member_count: allMembers.filter(member => member.group_id === group.id).length
-      }));
-
-      setGroups(groupsWithCounts);
+      setGroups(userGroups);
       
       // Auto-select first group if none selected and current selection is invalid
-      if (groupsWithCounts.length > 0 && (!selectedGroupId || !groupsWithCounts.find(g => g.id === selectedGroupId))) {
-        onGroupSelect(groupsWithCounts[0].id);
-      } else if (groupsWithCounts.length === 0) {
+      if (userGroups.length > 0 && (!selectedGroupId || !userGroups.find(g => g.id === selectedGroupId))) {
+        onGroupSelect(userGroups[0].id);
+      } else if (userGroups.length === 0) {
         // If no groups left, clear selection
         onGroupSelect('');
       }
@@ -439,14 +432,6 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
                           <Badge variant="outline" className="text-xs">
                             {group.code}
                           </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {group.member_count} member{group.member_count !== 1 ? 's' : ''}
-                          </span>
-                          {group.created_by === user?.id ? (
-                            <Crown className="h-4 w-4 text-yellow-600" />
-                          ) : (
-                            <User className="h-4 w-4 text-blue-600" />
-                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-1 ml-2 flex-shrink-0">

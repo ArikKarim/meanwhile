@@ -719,9 +719,20 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       // Add display names to time blocks
       const blocksWithDisplayNames = memberTimeBlocks.map(block => {
         const blockUser = allUsers.find(u => u.id === block.user_id);
+        const displayName = getDisplayName(blockUser);
+        
+        // Debug: Log user lookup
+        if (displayName === 'Unknown User') {
+          console.log('Unknown user found:', {
+            blockUserId: block.user_id,
+            blockUser,
+            allUsers: allUsers.map(u => ({ id: u.id, username: u.username }))
+          });
+        }
+        
         return {
           ...block,
-          displayName: getDisplayName(blockUser)
+          displayName
         };
       });
 
@@ -991,9 +1002,23 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                 const isOwnBlock = block.user_id === user?.id;
                 const { selfOverlap } = getOverlapLevel(block, timeBlocks);
                 
-                // Calculate width and left position for overlapping blocks
-                const blockWidth = block.totalColumns > 1 ? `${100 / block.totalColumns}%` : 'calc(100% - 4px)';
-                const leftPosition = block.totalColumns > 1 ? `${(block.column * 100) / block.totalColumns}%` : '2px';
+                // Calculate width and left position for overlapping blocks (Notion Calendar style)
+                let blockWidth, leftPosition, zIndex;
+                
+                if (block.totalColumns > 1) {
+                  // For overlapping events, use staggered Notion-style layout
+                  const offsetPerEvent = 8; // px offset for each overlapping event
+                  const maxOffset = (block.totalColumns - 1) * offsetPerEvent;
+                  
+                  blockWidth = `calc(100% - ${maxOffset + 8}px)`; // Subtract total offset + margins
+                  leftPosition = `${2 + (block.column * offsetPerEvent)}px`;
+                  zIndex = 10 + block.column; // Higher z-index for later events
+                } else {
+                  // Single event - full width
+                  blockWidth = 'calc(100% - 4px)';
+                  leftPosition = '2px';
+                  zIndex = 10;
+                }
                 
                 // Get current user color (dynamic)
                 const currentUserColor = userColors[block.user_id] || block.color || '#3b82f6';
@@ -1014,14 +1039,17 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                       height: `${Math.max(height - 4, 26)}px`,
                       left: leftPosition,
                       width: blockWidth,
+                      zIndex: zIndex,
                       backgroundColor: currentUserColor,
                       minHeight: '26px',
-                      marginLeft: '2px',
-                      marginRight: '2px',
+                      marginLeft: '0px', // Remove margins for Notion-style layout
+                      marginRight: '0px',
                       cursor: isOwnBlock ? 'pointer' : 'default',
                       border: `1px solid ${currentUserColor}dd`,
-                      padding: Math.max(height - 4, 26) < 50 ? '2px 4px' : '4px 6px', // Responsive padding
-                      transition: 'background-color 0.3s ease, border-color 0.3s ease' // Smooth color transitions
+                      borderRadius: '6px', // Slightly more rounded for modern look
+                      boxShadow: block.totalColumns > 1 ? '0 2px 4px rgba(0,0,0,0.1)' : '0 1px 2px rgba(0,0,0,0.05)',
+                      padding: Math.max(height - 4, 26) < 50 ? '3px 6px' : '6px 8px', // Better padding for stacked events
+                      transition: 'all 0.2s ease' // Smooth transitions for hover effects
                     }}
                     onClick={() => isOwnBlock && handleEditBlock(block)}
                   >
@@ -1058,7 +1086,12 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                       </>
                     ) : (
                       // Compact content for smaller blocks
-                      <div className="font-medium truncate text-xs leading-tight">{block.label}</div>
+                      <>
+                        <div className="font-medium truncate text-xs leading-tight">{block.label}</div>
+                        {block.displayName && (
+                          <div className="text-xs opacity-75 truncate">{block.displayName}</div>
+                        )}
+                      </>
                     )}
                     
                     {/* Drag handle - bottom */}
