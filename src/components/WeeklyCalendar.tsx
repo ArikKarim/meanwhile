@@ -220,38 +220,47 @@ const deleteTimeBlock = async (id: string): Promise<boolean> => {
 
 const getUsers = async (groupId?: string): Promise<StoredUser[]> => {
   try {
-    let query = supabase.from('profiles').select('*'); // Select all columns to see what's available
+    // Try to get all profiles first to see what's available
+    const { data: allProfiles, error: allError } = await supabase
+      .from('profiles')
+      .select('*');
     
-    // If we have a groupId, only fetch users who are in this group
-    if (groupId) {
-      const { data: groupMembers } = await supabase
+    console.log('All profiles query result:', { data: allProfiles, error: allError });
+    
+    if (allError) {
+      console.error('Error fetching all profiles:', allError);
+      return [];
+    }
+    
+    let profilesToUse = allProfiles || [];
+    
+    // If we have a groupId, filter to group members
+    if (groupId && allProfiles && allProfiles.length > 0) {
+      const { data: groupMembers, error: membersError } = await supabase
         .from('group_members')
         .select('user_id')
         .eq('group_id', groupId);
       
-      if (groupMembers && groupMembers.length > 0) {
+      console.log('Group members query result:', { data: groupMembers, error: membersError });
+      
+      if (!membersError && groupMembers && groupMembers.length > 0) {
         const memberIds = groupMembers.map(member => member.user_id);
-        query = query.in('id', memberIds);
+        profilesToUse = allProfiles.filter(profile => memberIds.includes(profile.id));
+        console.log('Filtered profiles to group members:', profilesToUse);
       }
     }
     
-    const { data: profiles, error } = await query;
-    
-    if (error) throw error;
-    
-    // Debug: Log raw profile data
-    console.log('Raw profiles from database:', profiles);
-    
     // Convert Supabase profiles to StoredUser format
-    const convertedUsers = (profiles || []).map(profile => ({
+    // Try different possible field names
+    const convertedUsers = profilesToUse.map(profile => ({
       id: profile.id,
-      username: profile.username || 'Unknown',
+      username: profile.username || profile.user_id || 'Unknown',
       password: '', // Not needed for display
-      firstName: profile.first_name || '',
-      lastName: profile.last_name || ''
+      firstName: profile.first_name || profile.firstName || '',
+      lastName: profile.last_name || profile.lastName || ''
     }));
     
-    console.log('Converted users:', convertedUsers);
+    console.log('Final converted users:', convertedUsers);
     return convertedUsers;
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -774,19 +783,23 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       // Add display names to time blocks
       const blocksWithDisplayNames = memberTimeBlocks.map(block => {
         const blockUser = allUsers.find(u => u.id === block.user_id);
-        const displayName = getDisplayName(blockUser);
         
-        // Debug: Check user lookup
-        console.log('Processing block:', {
-          blockId: block.id,
+        // Enhanced debug: Check user lookup in detail
+        console.log('User lookup debug:', {
           blockUserId: block.user_id,
-          blockLabel: block.label,
+          allUserIds: allUsers.map(u => u.id),
           foundUser: blockUser,
-          displayName: displayName,
-          userHasFirstName: blockUser?.firstName,
-          userHasLastName: blockUser?.lastName,
-          userUsername: blockUser?.username
+          allUsersDetailed: allUsers
         });
+        
+        let displayName;
+        if (blockUser) {
+          displayName = getDisplayName(blockUser);
+        } else {
+          // Fallback: try to get user info from current user or a default
+          console.warn('User not found for block, using fallback');
+          displayName = 'Team Member'; // Better than "Unknown User"
+        }
         
         return {
           ...block,
