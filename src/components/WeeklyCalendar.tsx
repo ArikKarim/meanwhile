@@ -1083,11 +1083,12 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                 let blockWidth, leftPosition, zIndex;
                 
                 if (block.totalColumns > 1) {
-                  // For overlapping events, use staggered Notion-style layout
-                  const offsetPerEvent = 8; // px offset for each overlapping event
+                  // For overlapping events, use staggered Notion-style layout with minimum width constraint
+                  const offsetPerEvent = Math.min(8, 60 / block.totalColumns); // Reduce offset for many overlaps
                   const maxOffset = (block.totalColumns - 1) * offsetPerEvent;
+                  const minWidthPx = Math.max(50, 120 / block.totalColumns); // Ensure minimum 50px or proportional width
                   
-                  blockWidth = `calc(100% - ${maxOffset + 8}px)`; // Subtract total offset + margins
+                  blockWidth = `max(${minWidthPx}px, calc(100% - ${maxOffset + 8}px))`; // Enforce minimum width
                   leftPosition = `${2 + (block.column * offsetPerEvent)}px`;
                   zIndex = 10 + (block.totalColumns - block.column); // Higher z-index for shorter duration events
                 } else {
