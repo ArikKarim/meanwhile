@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { LogOut, Calendar, Users, Settings, Palette, Eye, EyeOff, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 import GroupManager from '@/components/GroupManager';
 import WeeklyCalendar from '@/components/WeeklyCalendar';
 
@@ -270,25 +271,26 @@ const Index = () => {
   // Get group members for user filtering
   const fetchGroupMembers = async (groupId: string) => {
     try {
-      const storedMembers = localStorage.getItem('meanwhile_group_members');
-      const storedUsers = localStorage.getItem('meanwhile_users');
+      // Fetch group members from database
+      const { data: memberData, error } = await supabase
+        .from('group_members')
+        .select(`
+          user_id,
+          profiles!inner(user_id, username, first_name, last_name)
+        `)
+        .eq('group_id', groupId);
       
-      if (!storedMembers || !storedUsers) return;
-      
-      const allMembers = JSON.parse(storedMembers);
-      const allUsers = JSON.parse(storedUsers);
-      
-      const groupMemberData = allMembers
-        .filter((member: any) => member.group_id === groupId)
-        .map((member: any) => {
-          const userData = allUsers.find((u: any) => u.id === member.user_id);
-          return {
-            id: member.user_id,
-            username: userData?.username || 'Unknown',
-            firstName: userData?.firstName,
-            lastName: userData?.lastName
-          };
-        });
+      if (error) {
+        console.error('Error fetching group members:', error);
+        return;
+      }
+
+      const groupMemberData = (memberData || []).map((member: any) => ({
+        id: member.user_id,
+        username: member.profiles.username,
+        firstName: member.profiles.first_name,
+        lastName: member.profiles.last_name
+      }));
       
       setGroupMembers(groupMemberData);
       // Initially show all users
