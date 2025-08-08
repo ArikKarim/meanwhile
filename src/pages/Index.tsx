@@ -203,7 +203,9 @@ const Index = () => {
   // Listen for user color changes and update the state
   useEffect(() => {
     const handleColorChange = () => {
-      setUserColors(getUserColors());
+      const newUserColors = getUserColors();
+      console.log('User colors updated:', newUserColors);
+      setUserColors(newUserColors);
       if (user?.id) {
         setUserColor(getUserColor(user.id));
       }
@@ -478,6 +480,7 @@ const Index = () => {
                               backgroundColor: userColors[member.id] || '#3b82f6',
                               opacity: visibleUsers.has(member.id) ? 1 : 0.3
                             }}
+                            title={`Color: ${userColors[member.id] || '#3b82f6'} for user ${member.id}`}
                           />
                           <span className={visibleUsers.has(member.id) ? '' : 'text-muted-foreground'}>
                             {getDisplayName(member)}

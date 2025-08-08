@@ -723,7 +723,16 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
         const blockUser = allUsers.find(u => u.id === block.user_id);
         const displayName = getDisplayName(blockUser);
         
-        // User lookup completed
+        // Debug user lookup
+        if (!blockUser || displayName === 'Unknown User') {
+          console.log('User lookup issue:', {
+            blockUserId: block.user_id,
+            blockUser,
+            displayName,
+            allUsersCount: allUsers.length,
+            allUserIds: allUsers.map(u => u.id)
+          });
+        }
         
         return {
           ...block,
