@@ -376,9 +376,15 @@ const Index = () => {
     });
   };
 
-  const showOnlyMe = () => {
+  const toggleShowMine = () => {
     if (user?.id) {
-      setVisibleUsers(new Set([user.id]));
+      // If currently showing only the user, show everyone
+      if (visibleUsers.size === 1 && visibleUsers.has(user.id)) {
+        setVisibleUsers(new Set(groupMembers.map(member => member.id)));
+      } else {
+        // Otherwise, show only the current user
+        setVisibleUsers(new Set([user.id]));
+      }
     }
   };
 
@@ -459,15 +465,18 @@ const Index = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={showOnlyMe}
+                      onClick={toggleShowMine}
                       className="text-xs"
                     >
                       <Eye className="h-3 w-3 mr-1" />
-                      Show Only Me
+                      {visibleUsers.size === 1 && user?.id && visibleUsers.has(user.id) 
+                        ? 'Show All' 
+                        : 'Show Mine'
+                      }
                     </Button>
                   </div>
                   <CardDescription>
-                    Toggle visibility of individual users' schedules
+                    Uncheck users to hide their schedules
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
