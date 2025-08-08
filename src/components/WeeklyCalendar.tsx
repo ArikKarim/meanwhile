@@ -220,7 +220,7 @@ const deleteTimeBlock = async (id: string): Promise<boolean> => {
 
 const getUsers = async (groupId?: string): Promise<StoredUser[]> => {
   try {
-    let query = supabase.from('profiles').select('id, username, first_name, last_name');
+    let query = supabase.from('profiles').select('*'); // Select all columns to see what's available
     
     // If we have a groupId, only fetch users who are in this group
     if (groupId) {
@@ -239,14 +239,20 @@ const getUsers = async (groupId?: string): Promise<StoredUser[]> => {
     
     if (error) throw error;
     
+    // Debug: Log raw profile data
+    console.log('Raw profiles from database:', profiles);
+    
     // Convert Supabase profiles to StoredUser format
-    return (profiles || []).map(profile => ({
+    const convertedUsers = (profiles || []).map(profile => ({
       id: profile.id,
       username: profile.username || 'Unknown',
       password: '', // Not needed for display
       firstName: profile.first_name || '',
       lastName: profile.last_name || ''
     }));
+    
+    console.log('Converted users:', convertedUsers);
+    return convertedUsers;
   } catch (error) {
     console.error('Error fetching users:', error);
     return [];
@@ -740,6 +746,16 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       const allUsers = await getUsers(groupId);
       const groupMembers = await getGroupMembers();
       
+      // Debug: Log fetched data
+      console.log('Fetched data:', {
+        groupId,
+        timeBlocksCount: allTimeBlocks.length,
+        usersCount: allUsers.length,
+        groupMembersCount: groupMembers.length,
+        allUsers: allUsers.map(u => ({ id: u.id, firstName: u.firstName, lastName: u.lastName, username: u.username })),
+        timeBlockUserIds: allTimeBlocks.map(block => block.user_id).filter((id, index, arr) => arr.indexOf(id) === index)
+      });
+      
       // Filter time blocks for this group
       const groupTimeBlocks = allTimeBlocks.filter(block => block.group_id === groupId);
       
@@ -760,7 +776,17 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
         const blockUser = allUsers.find(u => u.id === block.user_id);
         const displayName = getDisplayName(blockUser);
         
-        // User lookup completed
+        // Debug: Check user lookup
+        console.log('Processing block:', {
+          blockId: block.id,
+          blockUserId: block.user_id,
+          blockLabel: block.label,
+          foundUser: blockUser,
+          displayName: displayName,
+          userHasFirstName: blockUser?.firstName,
+          userHasLastName: blockUser?.lastName,
+          userUsername: blockUser?.username
+        });
         
         return {
           ...block,
