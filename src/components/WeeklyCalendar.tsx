@@ -937,11 +937,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
         <div className="grid gap-0 border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm" style={{ gridTemplateColumns: 'auto 1fr 1fr 1fr 1fr 1fr 1fr 1fr' }}>
           {/* Time Column */}
           <div className="bg-slate-50/50 border-r border-slate-200 w-16">
-            {TIME_SLOTS.filter(slot => slot.minute === 0 || slot.minute === 30).map((timeSlot, index) => (
-              <div key={timeSlot.time} className={`h-[30px] text-xs text-slate-600 flex items-start justify-end pr-2 ${
-                timeSlot.minute === 0 ? 'border-t border-slate-300 font-medium' : 
-                'border-t border-slate-200'
-              }`}>
+            {TIME_SLOTS.filter(slot => slot.minute === 0).map((timeSlot, index) => (
+              <div key={timeSlot.time} className="h-[60px] text-xs text-slate-600 flex items-start justify-end pr-2 border-t border-slate-300 font-medium">
                 {timeSlot.minute === 0 && (
                   <div className="text-right text-xs leading-none pt-1">
                     {timeSlot.hour > 12 ? timeSlot.hour - 12 : timeSlot.hour === 0 ? 12 : timeSlot.hour}
