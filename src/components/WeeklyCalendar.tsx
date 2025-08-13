@@ -386,6 +386,17 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
 
 
 
+  // Selected free time block for details dialog
+  const [selectedFreeBlock, setSelectedFreeBlock] = useState<{ day: number; start: number; end: number } | null>(null);
+
+  const formatMinutesToDisplay = (totalMinutes: number): string => {
+    const hours24 = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    const period = hours24 >= 12 ? 'PM' : 'AM';
+    const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+    return `${hours12}:${mins.toString().padStart(2, '0')} ${period}`;
+  };
+
   const handleEditBlock = (block: TimeBlock) => {
     setEditingBlock(block);
     const formData = {
@@ -1264,7 +1275,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                   return (
                     <div
                       key={index}
-                      className="absolute left-0 right-0 mx-1 rounded text-xs text-white p-1"
+                      className="absolute left-0 right-0 mx-1 rounded text-xs text-white p-1 cursor-pointer hover:opacity-90"
                       style={{
                         top: `${top}px`,
                         height: `${height}px`,
@@ -1272,6 +1283,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                         opacity: 0.7,
                         minHeight: '20px'
                       }}
+                      onClick={() => setSelectedFreeBlock({ day: dayIndex, start: block.start, end: block.end })}
+                      title={`${formatMinutesToDisplay(block.start)} - ${formatMinutesToDisplay(block.end)}`}
                     >
                       <div className="font-medium">Free Time</div>
                 </div>
@@ -1281,6 +1294,22 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
         ))}
       </div>
       </div>
+
+      {/* Free Time Range Dialog */}
+      <Dialog open={!!selectedFreeBlock} onOpenChange={(open) => !open && setSelectedFreeBlock(null)}>
+        <DialogContent className="sm:max-w-[380px]">
+          <DialogHeader>
+            <DialogTitle>Free Time</DialogTitle>
+            <DialogDescription>
+              {selectedFreeBlock && (
+                <span>
+                  {DAYS[selectedFreeBlock.day]}: {formatMinutesToDisplay(selectedFreeBlock.start)} - {formatMinutesToDisplay(selectedFreeBlock.end)}
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Time Block Dialog */}
       <Dialog open={!!editingBlock} onOpenChange={(open) => {
