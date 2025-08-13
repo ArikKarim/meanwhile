@@ -215,13 +215,29 @@ const Index = () => {
   const [showTimeSettings, setShowTimeSettings] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
-  // Initialize user color and load all user colors
+  // Initialize user color and load from database/localStorage
   useEffect(() => {
-    if (user?.id) {
-      setUserColor(getUserColor(user.id));
-    }
-    // Load all user colors
-    setUserColors(getUserColors());
+    const loadColors = async () => {
+      if (user?.id) {
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('color')
+            .eq('user_id', user.id)
+            .single();
+          const dbColor = data?.color;
+          const effectiveColor = (typeof dbColor === 'string' && dbColor.length > 0) ? dbColor : getUserColor(user.id);
+          setUserColor(effectiveColor);
+          setUserColors(prev => ({ ...prev, [user.id!]: effectiveColor }));
+        } catch {
+          // Fallback to local storage
+          setUserColor(getUserColor(user.id));
+        }
+      }
+      // Prime with any locally stored colors
+      setUserColors(prev => ({ ...getUserColors(), ...prev }));
+    };
+    loadColors();
   }, [user?.id]);
 
   // Listen for user color changes and update the state
@@ -282,10 +298,12 @@ const Index = () => {
     });
   };
 
-  const updateUserColor = (newColor: string) => {
+  const updateUserColor = async (newColor: string) => {
     if (!user?.id) return;
     
-    if (isColorTaken(newColor, user.id)) {
+    // Check against currently loaded colors (DB-backed)
+    const taken = Object.entries(userColors).some(([uid, c]) => uid !== user.id && typeof c === 'string' && c.toLowerCase() === newColor.toLowerCase());
+    if (taken) {
       toast({
         title: "Color already taken",
         description: "Another user is already using this color. Please choose a different one.",
@@ -294,10 +312,23 @@ const Index = () => {
       return;
     }
 
-    const userColors = getUserColors();
-    userColors[user.id] = newColor;
-    saveUserColors(userColors);
+    // Persist to DB
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ color: newColor })
+        .eq('user_id', user.id);
+      if (error) throw error;
+    } catch (e) {
+      toast({ title: 'Failed to save color', description: 'Please try again.', variant: 'destructive' });
+      return;
+    }
+
+    // Persist locally for quick access/fallback
+    const updatedMap = { ...getUserColors(), [user.id]: newColor };
+    saveUserColors(updatedMap);
     setUserColor(newColor);
+    setUserColors(prev => ({ ...prev, [user.id]: newColor }));
     
     // Dispatch custom event to notify other components
     window.dispatchEvent(new CustomEvent('userColorChanged'));
@@ -316,7 +347,7 @@ const Index = () => {
         .from('group_members')
         .select(`
           user_id,
-          profiles!inner(user_id, username, first_name, last_name)
+          profiles!inner(user_id, username, first_name, last_name, color)
         `)
         .eq('group_id', groupId);
       
@@ -329,12 +360,21 @@ const Index = () => {
         id: member.user_id,
         username: member.profiles.username,
         firstName: member.profiles.first_name,
-        lastName: member.profiles.last_name
+        lastName: member.profiles.last_name,
+        color: member.profiles.color || undefined
       }));
       
       setGroupMembers(groupMemberData);
       // Initially show all users
       setVisibleUsers(new Set(groupMemberData.map((member: any) => member.id)));
+
+      // Build a color map from DB for these members
+      const dbColors: UserColors = {};
+      groupMemberData.forEach((m: any) => {
+        if (m.color) dbColors[m.id] = m.color;
+      });
+      // Merge with any locally stored colors, favoring DB
+      setUserColors(prev => ({ ...getUserColors(), ...prev, ...dbColors }));
     } catch (error) {
       console.error('Error fetching group members:', error);
     }
@@ -495,10 +535,9 @@ const Index = () => {
                           <div 
                             className="w-3 h-3 rounded-full" 
                             style={{ 
-                              backgroundColor: getUserColor(member.id),
+                              backgroundColor: (userColors[member.id] || getUserColor(member.id)),
                               opacity: visibleUsers.has(member.id) ? 1 : 0.3
                             }}
-
                           />
                           <span className={visibleUsers.has(member.id) ? '' : 'text-muted-foreground'}>
                             {getDisplayName(member)}
