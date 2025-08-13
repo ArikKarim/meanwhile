@@ -214,6 +214,8 @@ const Index = () => {
   const [calendarSettings, setCalendarSettings] = useState<CalendarSettings>({});
   const [showTimeSettings, setShowTimeSettings] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  // Realtime color updates
+  const [colorChannelActive, setColorChannelActive] = useState(false);
 
   // Initialize user color and load from database/localStorage
   useEffect(() => {
@@ -409,6 +411,37 @@ const Index = () => {
       setVisibleUsers(new Set());
     }
   }, [selectedGroupId]);
+
+  // Realtime subscription: reflect profile color changes immediately
+  useEffect(() => {
+    // Only when we have a group selected and some members loaded
+    if (!selectedGroupId || groupMembers.length === 0) return;
+
+    // Avoid duplicate subscriptions
+    if (colorChannelActive) return;
+
+    const channel = supabase
+      .channel('profiles-color-updates')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, (payload: any) => {
+        const newUserId = payload?.new?.user_id;
+        const newColor = payload?.new?.color;
+        if (!newUserId || typeof newColor !== 'string') return;
+        // Only update if this user is part of current group
+        const isMember = groupMembers.some((m: any) => m.id === newUserId);
+        if (!isMember) return;
+        setUserColors(prev => ({ ...prev, [newUserId]: newColor }));
+        if (user?.id === newUserId) setUserColor(newColor);
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') setColorChannelActive(true);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+      setColorChannelActive(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGroupId, groupMembers.map((m: any) => m.id).join(','), user?.id]);
 
   // Check admin status when group changes
   useEffect(() => {
