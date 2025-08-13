@@ -566,9 +566,10 @@ const Index = () => {
                 <div className="bg-white rounded-lg border shadow-sm">
                   <div className="p-4 border-b">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-base font-medium">
+                      <div className="text-base font-semibold flex items-center gap-2">
+                        <Calendar className="h-4 w-4" />
                         Group Schedule
-                      </h3>
+                      </div>
                       <div className="flex items-center gap-3">
                         {/* Time Settings Button */}
                         {selectedGroupId && (
