@@ -518,11 +518,11 @@ const Index = () => {
             {/* User Color Settings */}
             {user && (
               <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Palette className="h-4 w-4" />
-                    Your Color
-                  </CardTitle>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Palette className="h-4 w-4" />
+                      Your Color
+                    </CardTitle>
                   <CardDescription>
                     Choose a unique color for all your events
                   </CardDescription>
@@ -566,7 +566,7 @@ const Index = () => {
                 <div className="bg-white rounded-lg border shadow-sm">
                   <div className="p-4 border-b">
                     <div className="flex items-center justify-between">
-                      <h3 className="font-medium text-base" style={{ fontFamily: 'Instrument Serif, serif' }}>
+                      <h3 className="text-base font-medium">
                         Group Schedule
                       </h3>
                       <div className="flex items-center gap-3">
