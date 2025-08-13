@@ -234,8 +234,7 @@ const Index = () => {
           setUserColor(getUserColor(user.id));
         }
       }
-      // Prime with any locally stored colors
-      setUserColors(prev => ({ ...getUserColors(), ...prev }));
+      // Do not override member map with local storage; only use local for unknown users
     };
     loadColors();
   }, [user?.id]);
@@ -368,13 +367,16 @@ const Index = () => {
       // Initially show all users
       setVisibleUsers(new Set(groupMemberData.map((member: any) => member.id)));
 
-      // Build a color map from DB for these members
-      const dbColors: UserColors = {};
+      // Build a definitive color map for these members using DB color or deterministic fallback
+      const memberColors: UserColors = {};
       groupMemberData.forEach((m: any) => {
-        if (m.color) dbColors[m.id] = m.color;
+        memberColors[m.id] = m.color || getUserColor(m.id);
       });
-      // Merge with any locally stored colors, favoring DB
-      setUserColors(prev => ({ ...getUserColors(), ...prev, ...dbColors }));
+      // Merge with current user if not included yet
+      if (user?.id && !memberColors[user.id]) {
+        memberColors[user.id] = userColor || getUserColor(user.id);
+      }
+      setUserColors(memberColors);
     } catch (error) {
       console.error('Error fetching group members:', error);
     }

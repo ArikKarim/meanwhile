@@ -337,7 +337,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [loading, setLoading] = useState(true);
   // Use userColors from props, fallback to localStorage if not provided
-  const userColors = propUserColors || getUserColors();
+  // Prefer colors passed from parent (DB-synced). Fallback to local if absent.
+  const userColors = propUserColors && Object.keys(propUserColors).length > 0 ? propUserColors : getUserColors();
   const [editingBlock, setEditingBlock] = useState<TimeBlock | null>(null);
   const [editForm, setEditForm] = useState({
     label: '',
