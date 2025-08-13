@@ -1111,6 +1111,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                 }
                 
                 // Get current user color (always use UUID-based color for consistency)
+                // Always color by the block owner's chosen color
                 const currentUserColor = (userColors && userColors[block.user_id]) || getUserColor(block.user_id);
                 
                 // Only show warning for personal overlaps (same user)

@@ -242,9 +242,11 @@ const Index = () => {
   // Listen for user color changes and update the state
   useEffect(() => {
     const handleColorChange = () => {
-      setUserColors(getUserColors());
       if (user?.id) {
-        setUserColor(getUserColor(user.id));
+        const updated = getUserColor(user.id);
+        setUserColor(updated);
+        // Only update the current user's color in the map to avoid wiping others
+        setUserColors(prev => ({ ...prev, [user.id]: updated }));
       }
     };
 
