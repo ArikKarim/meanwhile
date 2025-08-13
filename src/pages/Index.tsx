@@ -369,11 +369,27 @@ const Index = () => {
       // Initially show all users
       setVisibleUsers(new Set(groupMemberData.map((member: any) => member.id)));
 
-      // Build a definitive color map for these members using DB color or deterministic fallback
-      const memberColors: UserColors = {};
-      groupMemberData.forEach((m: any) => {
-        memberColors[m.id] = m.color || getUserColor(m.id);
-      });
+      // Fetch colors directly from profiles to avoid any JOIN inconsistencies
+      const memberIds = groupMemberData.map((m: any) => m.id);
+      let memberColors: UserColors = {};
+      if (memberIds.length > 0) {
+        try {
+          const { data: colorRows } = await supabase
+            .from('profiles')
+            .select('user_id, color')
+            .in('user_id', memberIds);
+          (colorRows || []).forEach((row: any) => {
+            if (row.user_id) {
+              memberColors[row.user_id] = row.color || getUserColor(row.user_id);
+            }
+          });
+        } catch (e) {
+          // Fallback if direct fetch fails
+          groupMemberData.forEach((m: any) => {
+            memberColors[m.id] = m.color || getUserColor(m.id);
+          });
+        }
+      }
       // Merge with current user if not included yet
       if (user?.id && !memberColors[user.id]) {
         memberColors[user.id] = userColor || getUserColor(user.id);
