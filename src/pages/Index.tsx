@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Navigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -52,6 +52,15 @@ const getGroups = () => {
   } catch {
     return [];
   }
+};
+
+// Simple debounce utility
+const debounce = (func: (...args: any[]) => void, delay: number) => {
+  let timeoutId: NodeJS.Timeout;
+  return (...args: any[]) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func(...args), delay);
+  };
 };
 
 // Predefined color palette for auto-assignment
@@ -567,83 +576,97 @@ const Index = () => {
     });
   };
 
-  const updateUserColor = async (newColor: string) => {
-    if (!user?.id || !selectedGroupId) {
-      console.error('Missing user ID or group ID for color update');
-      return;
-    }
-    
-    const normalizedColor = (newColor || '').toLowerCase();
-    console.log('Starting color update:', { userId: user.id, groupId: selectedGroupId, newColor: normalizedColor });
-    
-    try {
-      // Update group-specific color using the atomic RPC
-      console.log('Saving color to database via RPC...');
-      const result = await setUserColorForGroup(user.id, selectedGroupId, normalizedColor);
-      
-      if (!result.success) {
-        console.error('Failed to save color to database:', result.error);
-        
-        // Handle specific error cases
-        if (result.error === 'color_taken') {
-          toast({
-            title: "Color already taken",
-            description: "Another user is already using this color in this group. Please choose a different one.",
-            variant: "destructive"
-          });
-          return;
-        }
-        
-        if (result.error === 'not_group_member') {
-          toast({
-            title: "Access denied",
-            description: "You must be a member of this group to change colors.",
-            variant: "destructive"
-          });
-          return;
-        }
-        
-        // Generic error
-        toast({
-          title: "Error updating color",
-          description: `Failed to save color: ${result.error}`,
-          variant: "destructive"
-        });
+  // Debounced version that only shows toast after user stops dragging
+  const debouncedUpdateUserColor = useCallback(
+    debounce(async (newColor: string) => {
+      if (!user?.id || !selectedGroupId) {
+        console.error('Missing user ID or group ID for color update');
         return;
       }
-
-      console.log('Color saved successfully, updating UI...');
-
-      // Update local state immediately for better UX
-      setUserColor(normalizedColor);
-      setUserColors(prev => ({ ...prev, [user.id]: normalizedColor }));
-      setGroupColors(prev => ({ ...prev, [user.id]: normalizedColor }));
       
-      // Refresh group colors from database to ensure consistency
+      const normalizedColor = (newColor || '').toLowerCase();
+      console.log('Starting debounced color update:', { userId: user.id, groupId: selectedGroupId, newColor: normalizedColor });
+      
       try {
-        const updatedGroupColors = await fetchGroupColors(selectedGroupId);
-        setGroupColors(updatedGroupColors);
-        setUserColors(updatedGroupColors);
-      } catch (fetchError) {
-        console.warn('Could not refresh group colors, but color update succeeded:', fetchError);
+        // Update group-specific color using the atomic RPC
+        console.log('Saving color to database via RPC...');
+        const result = await setUserColorForGroup(user.id, selectedGroupId, normalizedColor);
+        
+        if (!result.success) {
+          console.error('Failed to save color to database:', result.error);
+          
+          // Handle specific error cases
+          if (result.error === 'color_taken') {
+            toast({
+              title: "Color already taken",
+              description: "Another user is already using this color in this group. Please choose a different one.",
+              variant: "destructive"
+            });
+            return;
+          }
+          
+          if (result.error === 'not_group_member') {
+            toast({
+              title: "Access denied",
+              description: "You must be a member of this group to change colors.",
+              variant: "destructive"
+            });
+            return;
+          }
+          
+          // Generic error
+          toast({
+            title: "Error updating color",
+            description: `Failed to save color: ${result.error}`,
+            variant: "destructive"
+          });
+          return;
+        }
+
+        console.log('Color saved successfully, updating UI...');
+        
+        // Refresh group colors from database to ensure consistency
+        try {
+          const updatedGroupColors = await fetchGroupColors(selectedGroupId);
+          setGroupColors(updatedGroupColors);
+          setUserColors(updatedGroupColors);
+        } catch (fetchError) {
+          console.warn('Could not refresh group colors, but color update succeeded:', fetchError);
+        }
+        
+        // Dispatch custom event to notify other components
+        window.dispatchEvent(new CustomEvent('userColorChanged'));
+        
+        console.log('Color update completed successfully');
+        toast({
+          title: "Color updated",
+          description: "Your color has been updated successfully!"
+        });
+      } catch (error) {
+        console.error('Error in updateUserColor:', error);
+        toast({
+          title: "Error updating color",
+          description: `An unexpected error occurred: ${error instanceof Error ? error.message : 'Unknown error'}. Check browser console for details.`,
+          variant: "destructive"
+        });
       }
-      
-      // Dispatch custom event to notify other components
-      window.dispatchEvent(new CustomEvent('userColorChanged'));
-      
-      console.log('Color update completed successfully');
-      toast({
-        title: "Color updated",
-        description: "Your color has been updated successfully!"
-      });
-    } catch (error) {
-      console.error('Error in updateUserColor:', error);
-      toast({
-        title: "Error updating color",
-        description: `An unexpected error occurred: ${error instanceof Error ? error.message : 'Unknown error'}. Check browser console for details.`,
-        variant: "destructive"
-      });
-    }
+    }, 1000), // Wait 1 second after user stops dragging
+    [user?.id, selectedGroupId]
+  );
+
+  // Immediate UI update function (no toast, no database save)
+  const updateUserColorImmediate = (newColor: string) => {
+    if (!user?.id) return;
+    
+    const normalizedColor = (newColor || '').toLowerCase();
+    
+    // Update local state immediately for smooth UI experience
+    setUserColor(normalizedColor);
+    setUserColors(prev => ({ ...prev, [user.id]: normalizedColor }));
+    setGroupColors(prev => ({ ...prev, [user.id]: normalizedColor }));
+    
+    // Trigger debounced database save
+    debouncedUpdateUserColor(normalizedColor);
   };
 
   // Helper function to convert time to minutes for overlap detection
@@ -956,7 +979,7 @@ const Index = () => {
                       <input
                         type="color"
                         value={selectedGroupId && user?.id ? getUserColorForGroupSync(user.id, groupColors) : userColor}
-                        onChange={(e) => updateUserColor(e.target.value)}
+                        onChange={(e) => updateUserColorImmediate(e.target.value)}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                       />
                       <div 
