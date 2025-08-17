@@ -130,8 +130,22 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Ensure realtime publication
-ALTER PUBLICATION supabase_realtime ADD TABLE public.user_group_colors;
+-- Ensure realtime publication (idempotent)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_publication_rel pr
+    JOIN pg_publication p ON p.oid = pr.prpubid
+    JOIN pg_class c ON c.oid = pr.prrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE p.pubname = 'supabase_realtime'
+      AND n.nspname = 'public'
+      AND c.relname = 'user_group_colors'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.user_group_colors;
+  END IF;
+END $$;
 
 -- RLS: keep existing policies; ensure SELECT visible to group members, and users manage their own rows
 -- (Assumes policies already exist; otherwise, uncomment below)
