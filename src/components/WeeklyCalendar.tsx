@@ -34,21 +34,10 @@ interface WeeklyCalendarProps {
 const DAYS_SUNDAY_START = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAYS_MONDAY_START = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-// User color system (replaces category-based colors)
-const USER_COLORS_KEY = 'meanwhile_user_colors';
-
+// User color system
 interface UserColors {
   [userId: string]: string;
 }
-
-const getUserColors = (): UserColors => {
-  try {
-    const stored = localStorage.getItem(USER_COLORS_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
-};
 
 // Predefined color palette for auto-assignment (same as Index.tsx)
 const DEFAULT_COLORS = [
@@ -64,12 +53,8 @@ const DEFAULT_COLORS = [
   '#6366f1', // Indigo
 ];
 
+// Helper function for color assignment
 const getUserColor = (userId: string): string => {
-  const userColors = getUserColors();
-  if (userColors[userId]) {
-    return userColors[userId];
-  }
-  
   // Auto-assign a color based on user ID hash
   const hashCode = userId.split('').reduce((a, b) => {
     a = ((a << 5) - a) + b.charCodeAt(0);
@@ -78,6 +63,8 @@ const getUserColor = (userId: string): string => {
   const colorIndex = Math.abs(hashCode) % DEFAULT_COLORS.length;
   return DEFAULT_COLORS[colorIndex];
 };
+
+
 
 // Category options (no colors, just tags)
 const CATEGORIES = [
@@ -306,7 +293,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     if (groupColors && groupColors[userId]) {
       return groupColors[userId];
     }
-    return (propUserColors && propUserColors[userId]) || getUserColor(userId);
+    // Fallback to prop colors or default
+    return (propUserColors && propUserColors[userId]) || DEFAULT_COLORS[0];
   };
   
   // Helper function to convert UI day index to storage day index (0=Sunday, 1=Monday, etc.)
@@ -345,9 +333,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
 
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [loading, setLoading] = useState(true);
-  // Use userColors from props, fallback to localStorage if not provided
-  // Prefer colors passed from parent (DB-synced). Fallback to local if absent.
-  const userColors = propUserColors && Object.keys(propUserColors).length > 0 ? propUserColors : getUserColors();
+  // Use userColors from props (DB-synced)
+  const userColors = propUserColors || {};
   const [editingBlock, setEditingBlock] = useState<TimeBlock | null>(null);
   const [editForm, setEditForm] = useState({
     label: '',

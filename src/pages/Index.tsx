@@ -15,14 +15,8 @@ import { supabase } from '@/integrations/supabase/client';
 import GroupManager from '@/components/GroupManager';
 import WeeklyCalendar from '@/components/WeeklyCalendar';
 
-// Group-specific color system
-const USER_GROUP_COLORS_KEY = 'meanwhile_user_group_colors';
 // Calendar settings system
 const CALENDAR_SETTINGS_KEY = 'meanwhile_calendar_settings';
-
-interface UserGroupColors {
-  [userIdGroupId: string]: string; // Format: "userId_groupId"
-}
 
 interface UserColors {
   [userId: string]: string;
@@ -36,31 +30,7 @@ interface CalendarSettings {
   };
 }
 
-const getUserGroupColors = (): UserGroupColors => {
-  try {
-    const stored = localStorage.getItem(USER_GROUP_COLORS_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
-};
 
-const saveUserGroupColors = (colors: UserGroupColors) => {
-  localStorage.setItem(USER_GROUP_COLORS_KEY, JSON.stringify(colors));
-};
-
-const getUserColors = (): UserColors => {
-  try {
-    const stored = localStorage.getItem('meanwhile_user_colors');
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
-};
-
-const saveUserColors = (colors: UserColors) => {
-  localStorage.setItem('meanwhile_user_colors', JSON.stringify(colors));
-};
 
 const getCalendarSettings = (): CalendarSettings => {
   try {
@@ -98,62 +68,8 @@ const DEFAULT_COLORS = [
   '#6366f1', // Indigo
 ];
 
-// Simplified group-specific colors using localStorage for now
-const getUserColorForGroup = (userId: string, groupId: string): string => {
-  const groupColors = getUserGroupColors();
-  const key = `${userId}_${groupId}`;
-  
-  if (groupColors[key]) {
-    return groupColors[key];
-  }
-  
-  // Auto-assign a color based on user ID and group ID hash
-  const combined = `${userId}${groupId}`;
-  const hashCode = combined.split('').reduce((a, b) => {
-    a = ((a << 5) - a) + b.charCodeAt(0);
-    return a & a;
-  }, 0);
-  const colorIndex = Math.abs(hashCode) % DEFAULT_COLORS.length;
-  return DEFAULT_COLORS[colorIndex];
-};
-
-// Synchronous version that uses loaded state
-const getUserColorForGroupSync = (userId: string, groupColors: {[userId: string]: string}): string => {
-  if (groupColors[userId]) {
-    return groupColors[userId];
-  }
-  return DEFAULT_COLORS[0]; // fallback
-};
-
-const setUserColorForGroup = (userId: string, groupId: string, color: string): boolean => {
-  try {
-    const groupColors = getUserGroupColors();
-    const key = `${userId}_${groupId}`;
-    groupColors[key] = color;
-    saveUserGroupColors(groupColors);
-    return true;
-  } catch (error) {
-    console.error('Error setting user color for group:', error);
-    return false;
-  }
-};
-
-const isColorTakenInGroup = (color: string, groupId: string, excludeUserId?: string): boolean => {
-  const groupColors = getUserGroupColors();
-  return Object.entries(groupColors).some(([key, userColor]) => {
-    const [userId, keyGroupId] = key.split('_');
-    return keyGroupId === groupId && 
-           userId !== excludeUserId && 
-           userColor.toLowerCase() === color.toLowerCase();
-  });
-};
-
+// Helper function for color assignment
 const getUserColor = (userId: string): string => {
-  const userColors = getUserColors();
-  if (userColors[userId]) {
-    return userColors[userId];
-  }
-  
   // Auto-assign a color based on user ID hash
   const hashCode = userId.split('').reduce((a, b) => {
     a = ((a << 5) - a) + b.charCodeAt(0);
@@ -163,12 +79,92 @@ const getUserColor = (userId: string): string => {
   return DEFAULT_COLORS[colorIndex];
 };
 
-const isColorTaken = (color: string, excludeUserId?: string): boolean => {
-  const userColors = getUserColors();
-  return Object.entries(userColors).some(([userId, userColor]) => 
-    userId !== excludeUserId && userColor.toLowerCase() === color.toLowerCase()
-  );
+// Temporary localStorage-based system until migration runs
+const getUserColorForGroup = (userId: string, groupId: string): string => {
+  try {
+    const stored = localStorage.getItem('meanwhile_user_group_colors');
+    const groupColors = stored ? JSON.parse(stored) : {};
+    const key = `${userId}_${groupId}`;
+    
+    if (groupColors[key]) {
+      return groupColors[key];
+    }
+    
+    // Auto-assign a color based on user ID and group ID hash
+    const combined = `${userId}${groupId}`;
+    const hashCode = combined.split('').reduce((a, b) => {
+      a = ((a << 5) - a) + b.charCodeAt(0);
+      return a & a;
+    }, 0);
+    const colorIndex = Math.abs(hashCode) % DEFAULT_COLORS.length;
+    return DEFAULT_COLORS[colorIndex];
+  } catch (error) {
+    console.error('Error getting user color for group:', error);
+    return DEFAULT_COLORS[0];
+  }
 };
+
+// Synchronous version that uses loaded state
+const getUserColorForGroupSync = (userId: string, groupColors: {[userId: string]: string}): string => {
+  if (groupColors[userId]) {
+    return groupColors[userId];
+  }
+  return getUserColor(userId); // fallback
+};
+
+const setUserColorForGroup = (userId: string, groupId: string, color: string): boolean => {
+  try {
+    const stored = localStorage.getItem('meanwhile_user_group_colors');
+    const groupColors = stored ? JSON.parse(stored) : {};
+    const key = `${userId}_${groupId}`;
+    groupColors[key] = color;
+    localStorage.setItem('meanwhile_user_group_colors', JSON.stringify(groupColors));
+    return true;
+  } catch (error) {
+    console.error('Error setting user color for group:', error);
+    return false;
+  }
+};
+
+const isColorTakenInGroup = (color: string, groupId: string, excludeUserId?: string): boolean => {
+  try {
+    const stored = localStorage.getItem('meanwhile_user_group_colors');
+    const groupColors = stored ? JSON.parse(stored) : {};
+    
+    return Object.entries(groupColors).some(([key, userColor]) => {
+      const [userId, keyGroupId] = key.split('_');
+      return keyGroupId === groupId && 
+             userId !== excludeUserId && 
+             (userColor as string).toLowerCase() === color.toLowerCase();
+    });
+  } catch (error) {
+    console.error('Error checking if color is taken:', error);
+    return false;
+  }
+};
+
+// Fetch all group colors (localStorage version)
+const fetchGroupColors = (groupId: string): {[userId: string]: string} => {
+  try {
+    const stored = localStorage.getItem('meanwhile_user_group_colors');
+    const allGroupColors = stored ? JSON.parse(stored) : {};
+    
+    const colorMap: {[userId: string]: string} = {};
+    Object.entries(allGroupColors).forEach(([key, color]) => {
+      const [userId, keyGroupId] = key.split('_');
+      if (keyGroupId === groupId) {
+        colorMap[userId] = color as string;
+      }
+    });
+    
+    return colorMap;
+  } catch (error) {
+    console.error('Error fetching group colors:', error);
+    return {};
+  }
+};
+
+
 
 // Time Range Form Component
 const TimeRangeForm = ({ groupId, currentSettings, onUpdate, readOnly = false }: {
@@ -395,18 +391,25 @@ const Index = () => {
         setVisibleUsers(new Set(members.map(m => m.id)));
         setGroupMembers(members);
 
-        // Generate group-specific colors for all members
+        // Fetch group-specific colors from localStorage
+        const groupColorsFromStorage = fetchGroupColors(selectedGroupId);
+        
+        // Ensure all members have colors assigned
         const updatedColors: UserColors = {};
-        const groupColors: {[userId: string]: string} = {};
+        const finalGroupColors: {[userId: string]: string} = {};
         
         members.forEach(member => {
-          const groupColor = getUserColorForGroup(member.id, selectedGroupId);
-          updatedColors[member.id] = groupColor;
-          groupColors[member.id] = groupColor;
+          let memberColor = groupColorsFromStorage[member.id];
+          if (!memberColor) {
+            // Auto-assign color if not found
+            memberColor = getUserColorForGroup(member.id, selectedGroupId);
+          }
+          updatedColors[member.id] = memberColor;
+          finalGroupColors[member.id] = memberColor;
         });
         
         setUserColors(updatedColors);
-        setGroupColors(groupColors);
+        setGroupColors(finalGroupColors);
         
       } catch (error) {
         console.error('Error fetching group members:', error);
@@ -417,6 +420,8 @@ const Index = () => {
 
     fetchGroupMembers();
   }, [selectedGroupId, user?.id]);
+
+
 
   // Load calendar settings
   useEffect(() => {
