@@ -457,20 +457,63 @@ const Index = () => {
         async (payload) => {
           console.log('Color change detected:', payload);
           
-          // Refresh group colors when any color changes in this group
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE' || payload.eventType === 'DELETE') {
-            const updatedGroupColors = await fetchGroupColors(selectedGroupId);
-            setGroupColors(updatedGroupColors);
-            setUserColors(updatedGroupColors);
+          try {
+            // Refresh group colors when any color changes in this group
+            if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE' || payload.eventType === 'DELETE') {
+              const updatedGroupColors = await fetchGroupColors(selectedGroupId);
+              setGroupColors(updatedGroupColors);
+              setUserColors(updatedGroupColors);
+              
+              // Update current user's color state if it changed
+              if (user?.id && updatedGroupColors[user.id]) {
+                setUserColor(updatedGroupColors[user.id]);
+              }
+              
+              console.log('Group colors updated from real-time event:', updatedGroupColors);
+            }
+          } catch (error) {
+            console.error('Error handling real-time color update:', error);
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Color subscription status:', status);
+      });
 
     return () => {
       subscription.unsubscribe();
     };
-  }, [selectedGroupId]);
+  }, [selectedGroupId, user?.id]);
+
+  // Manual refresh function for colors (useful for debugging)
+  const refreshGroupColors = async () => {
+    if (!selectedGroupId) return;
+    
+    try {
+      const updatedGroupColors = await fetchGroupColors(selectedGroupId);
+      setGroupColors(updatedGroupColors);
+      setUserColors(updatedGroupColors);
+      
+      // Update current user's color state
+      if (user?.id && updatedGroupColors[user.id]) {
+        setUserColor(updatedGroupColors[user.id]);
+      }
+      
+      console.log('Manually refreshed group colors:', updatedGroupColors);
+      
+      toast({
+        title: "Colors refreshed",
+        description: "Group colors have been updated from the database."
+      });
+    } catch (error) {
+      console.error('Error refreshing group colors:', error);
+      toast({
+        title: "Error refreshing colors",
+        description: "Failed to refresh colors from database.",
+        variant: "destructive"
+      });
+    }
+  };
 
   // Load calendar settings
   useEffect(() => {
@@ -520,40 +563,54 @@ const Index = () => {
   const updateUserColor = async (newColor: string) => {
     if (!user?.id || !selectedGroupId) return;
     
-    // Check if color is taken in this group
-    const colorTaken = await isColorTakenInGroup(newColor, selectedGroupId, user.id);
-    if (colorTaken) {
-      toast({
-        title: "Color already taken",
-        description: "Another user is already using this color in this group. Please choose a different one.",
-        variant: "destructive"
-      });
-      return;
-    }
+    try {
+      // Check if color is taken in this group
+      const colorTaken = await isColorTakenInGroup(newColor, selectedGroupId, user.id);
+      if (colorTaken) {
+        toast({
+          title: "Color already taken",
+          description: "Another user is already using this color in this group. Please choose a different one.",
+          variant: "destructive"
+        });
+        return;
+      }
 
-    // Update group-specific color in database
-    const success = await setUserColorForGroup(user.id, selectedGroupId, newColor);
-    if (!success) {
+      // Update group-specific color in database
+      const success = await setUserColorForGroup(user.id, selectedGroupId, newColor);
+      if (!success) {
+        toast({
+          title: "Error updating color",
+          description: "Failed to save color. Please try again.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Update local state immediately for better UX
+      setUserColor(newColor);
+      setUserColors(prev => ({ ...prev, [user.id]: newColor }));
+      setGroupColors(prev => ({ ...prev, [user.id]: newColor }));
+      
+      // Refresh group colors from database to ensure consistency
+      const updatedGroupColors = await fetchGroupColors(selectedGroupId);
+      setGroupColors(updatedGroupColors);
+      setUserColors(updatedGroupColors);
+      
+      // Dispatch custom event to notify other components
+      window.dispatchEvent(new CustomEvent('userColorChanged'));
+      
+      toast({
+        title: "Color updated",
+        description: "Your color for this group has been successfully updated!"
+      });
+    } catch (error) {
+      console.error('Error in updateUserColor:', error);
       toast({
         title: "Error updating color",
-        description: "Failed to save color. Please try again.",
+        description: "An unexpected error occurred. Please try again.",
         variant: "destructive"
       });
-      return;
     }
-
-    // Update local state
-    setUserColor(newColor);
-    setUserColors(prev => ({ ...prev, [user.id]: newColor }));
-    setGroupColors(prev => ({ ...prev, [user.id]: newColor }));
-    
-    // Dispatch custom event to notify other components
-    window.dispatchEvent(new CustomEvent('userColorChanged'));
-    
-    toast({
-      title: "Color updated",
-      description: "Your color for this group has been successfully updated!"
-    });
   };
 
   // Helper function to convert time to minutes for overlap detection
@@ -977,6 +1034,14 @@ const Index = () => {
                               </div>
                             </DialogContent>
                           </Dialog>
+                        )}
+
+                        {/* Refresh Colors Button (for debugging) */}
+                        {selectedGroupId && (
+                          <Button variant="outline" size="sm" className="h-8" onClick={refreshGroupColors}>
+                            <Palette className="h-3 w-3 mr-1" />
+                            Refresh Colors
+                          </Button>
                         )}
 
                         {/* Time Settings Button */}

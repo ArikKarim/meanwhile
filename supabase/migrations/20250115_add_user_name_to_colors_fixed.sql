@@ -1,16 +1,27 @@
 -- Add user_name column to user_group_colors table
 ALTER TABLE public.user_group_colors 
-ADD COLUMN user_name TEXT;
+ADD COLUMN IF NOT EXISTS user_name TEXT;
 
 -- Update existing records with user names from profiles
 UPDATE public.user_group_colors 
 SET user_name = profiles.username
 FROM public.profiles 
-WHERE user_group_colors.user_id = profiles.user_id;
+WHERE user_group_colors.user_id = profiles.user_id
+AND user_group_colors.user_name IS NULL;
 
--- Make user_name required for future inserts
-ALTER TABLE public.user_group_colors 
-ALTER COLUMN user_name SET NOT NULL;
+-- Make user_name required for future inserts (only if it's not already set)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'user_group_colors' 
+    AND column_name = 'user_name' 
+    AND is_nullable = 'NO'
+  ) THEN
+    ALTER TABLE public.user_group_colors 
+    ALTER COLUMN user_name SET NOT NULL;
+  END IF;
+END $$;
 
 -- Update the assign_user_color_in_group function to include user_name
 CREATE OR REPLACE FUNCTION assign_user_color_in_group(
