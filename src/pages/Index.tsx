@@ -173,18 +173,21 @@ const setUserColorForGroup = async (userId: string, groupId: string, color: stri
     } catch (profileErr) {
       console.warn('Could not fetch user profile for color update, using default name:', profileErr);
     }
+
+    // Always normalize color to lowercase for consistency and uniqueness checks
+    const normalizedColor = (color || '').toLowerCase();
     
     // Try to upsert with user_name first
     let upsertData: any = {
       user_id: userId,
       group_id: groupId,
-      color: color,
+      color: normalizedColor,
       user_name: userName
     };
     
     let { error } = await supabase
       .from('user_group_colors')
-      .upsert(upsertData);
+      .upsert(upsertData, { onConflict: 'user_id,group_id' });
     
     // If error mentions user_name column doesn't exist, try without it
     if (error && error.message && error.message.includes('user_name')) {
@@ -192,12 +195,12 @@ const setUserColorForGroup = async (userId: string, groupId: string, color: stri
       upsertData = {
         user_id: userId,
         group_id: groupId,
-        color: color
+        color: normalizedColor
       };
       
       const retryResult = await supabase
         .from('user_group_colors')
-        .upsert(upsertData);
+        .upsert(upsertData, { onConflict: 'user_id,group_id' });
       
       error = retryResult.error;
     }
@@ -216,13 +219,18 @@ const setUserColorForGroup = async (userId: string, groupId: string, color: stri
 
 const isColorTakenInGroup = async (color: string, groupId: string, excludeUserId?: string): Promise<boolean> => {
   try {
-    const { data, error } = await supabase
+    const normalizedColor = (color || '').toLowerCase();
+    let query = supabase
       .from('user_group_colors')
       .select('user_id')
       .eq('group_id', groupId)
-      .eq('color', color)
-      .neq('user_id', excludeUserId || '');
-    
+      .eq('color', normalizedColor);
+
+    if (excludeUserId) {
+      query = query.neq('user_id', excludeUserId);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
     
     return (data && data.length > 0) || false;
@@ -627,7 +635,8 @@ const Index = () => {
       return;
     }
     
-    console.log('Starting color update:', { userId: user.id, groupId: selectedGroupId, newColor });
+    const normalizedColor = (newColor || '').toLowerCase();
+    console.log('Starting color update:', { userId: user.id, groupId: selectedGroupId, newColor: normalizedColor });
     
     try {
       // First ensure user has an entry in the database (this creates it if it doesn't exist)
@@ -636,7 +645,7 @@ const Index = () => {
       
       // Check if color is taken in this group
       console.log('Checking if color is taken...');
-      const colorTaken = await isColorTakenInGroup(newColor, selectedGroupId, user.id);
+      const colorTaken = await isColorTakenInGroup(normalizedColor, selectedGroupId, user.id);
       if (colorTaken) {
         console.log('Color is already taken by another user');
         toast({
@@ -649,7 +658,7 @@ const Index = () => {
 
       // Update group-specific color in database
       console.log('Saving color to database...');
-      const success = await setUserColorForGroup(user.id, selectedGroupId, newColor);
+      const success = await setUserColorForGroup(user.id, selectedGroupId, normalizedColor);
       if (!success) {
         console.error('Failed to save color to database');
         toast({
@@ -663,9 +672,9 @@ const Index = () => {
       console.log('Color saved successfully, updating UI...');
 
       // Update local state immediately for better UX
-      setUserColor(newColor);
-      setUserColors(prev => ({ ...prev, [user.id]: newColor }));
-      setGroupColors(prev => ({ ...prev, [user.id]: newColor }));
+      setUserColor(normalizedColor);
+      setUserColors(prev => ({ ...prev, [user.id]: normalizedColor }));
+      setGroupColors(prev => ({ ...prev, [user.id]: normalizedColor }));
       
       // Refresh group colors from database to ensure consistency
       const updatedGroupColors = await fetchGroupColors(selectedGroupId);
