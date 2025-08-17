@@ -15,10 +15,14 @@ import { supabase } from '@/integrations/supabase/client';
 import GroupManager from '@/components/GroupManager';
 import WeeklyCalendar from '@/components/WeeklyCalendar';
 
-// User color system
-const USER_COLORS_KEY = 'meanwhile_user_colors';
+// Group-specific color system
+const USER_GROUP_COLORS_KEY = 'meanwhile_user_group_colors';
 // Calendar settings system
 const CALENDAR_SETTINGS_KEY = 'meanwhile_calendar_settings';
+
+interface UserGroupColors {
+  [userIdGroupId: string]: string; // Format: "userId_groupId"
+}
 
 interface UserColors {
   [userId: string]: string;
@@ -32,9 +36,22 @@ interface CalendarSettings {
   };
 }
 
+const getUserGroupColors = (): UserGroupColors => {
+  try {
+    const stored = localStorage.getItem(USER_GROUP_COLORS_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveUserGroupColors = (colors: UserGroupColors) => {
+  localStorage.setItem(USER_GROUP_COLORS_KEY, JSON.stringify(colors));
+};
+
 const getUserColors = (): UserColors => {
   try {
-    const stored = localStorage.getItem(USER_COLORS_KEY);
+    const stored = localStorage.getItem('meanwhile_user_colors');
     return stored ? JSON.parse(stored) : {};
   } catch {
     return {};
@@ -42,7 +59,7 @@ const getUserColors = (): UserColors => {
 };
 
 const saveUserColors = (colors: UserColors) => {
-  localStorage.setItem(USER_COLORS_KEY, JSON.stringify(colors));
+  localStorage.setItem('meanwhile_user_colors', JSON.stringify(colors));
 };
 
 const getCalendarSettings = (): CalendarSettings => {
@@ -80,6 +97,41 @@ const DEFAULT_COLORS = [
   '#f97316', // Orange
   '#6366f1', // Indigo
 ];
+
+const getUserColorForGroup = (userId: string, groupId: string): string => {
+  const groupColors = getUserGroupColors();
+  const key = `${userId}_${groupId}`;
+  
+  if (groupColors[key]) {
+    return groupColors[key];
+  }
+  
+  // Auto-assign a color based on user ID and group ID hash
+  const combined = `${userId}${groupId}`;
+  const hashCode = combined.split('').reduce((a, b) => {
+    a = ((a << 5) - a) + b.charCodeAt(0);
+    return a & a;
+  }, 0);
+  const colorIndex = Math.abs(hashCode) % DEFAULT_COLORS.length;
+  return DEFAULT_COLORS[colorIndex];
+};
+
+const setUserColorForGroup = (userId: string, groupId: string, color: string) => {
+  const groupColors = getUserGroupColors();
+  const key = `${userId}_${groupId}`;
+  groupColors[key] = color;
+  saveUserGroupColors(groupColors);
+};
+
+const isColorTakenInGroup = (color: string, groupId: string, excludeUserId?: string): boolean => {
+  const groupColors = getUserGroupColors();
+  return Object.entries(groupColors).some(([key, userColor]) => {
+    const [userId, keyGroupId] = key.split('_');
+    return keyGroupId === groupId && 
+           userId !== excludeUserId && 
+           userColor.toLowerCase() === color.toLowerCase();
+  });
+};
 
 const getUserColor = (userId: string): string => {
   const userColors = getUserColors();
@@ -219,6 +271,7 @@ const Index = () => {
   const [targetGroupId, setTargetGroupId] = useState<string>('');
   const [copyLoading, setCopyLoading] = useState(false);
   const [userGroups, setUserGroups] = useState<Array<{id: string, name: string}>>([]);
+  const [groupMembersList, setGroupMembersList] = useState<Array<{id: string, username: string, firstName?: string, lastName?: string}>>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   // Realtime color updates
   const [colorChannelActive, setColorChannelActive] = useState(false);
@@ -292,6 +345,55 @@ const Index = () => {
     fetchUserGroups();
   }, [user?.id]);
 
+  // Fetch group members when selectedGroupId changes
+  useEffect(() => {
+    const fetchGroupMembers = async () => {
+      if (!selectedGroupId || !user?.id) {
+        setGroupMembersList([]);
+        setVisibleUsers(new Set());
+        return;
+      }
+
+      try {
+        const { data: memberData, error } = await supabase
+          .from('group_members')
+          .select(`
+            user_id,
+            profiles!inner(user_id, username, first_name, last_name)
+          `)
+          .eq('group_id', selectedGroupId);
+        
+        if (error) throw error;
+        
+        const members = memberData?.map((m: any) => ({
+          id: m.profiles.user_id,
+          username: m.profiles.username || 'Unknown',
+          firstName: m.profiles.first_name || '',
+          lastName: m.profiles.last_name || ''
+        })) || [];
+        
+        setGroupMembersList(members);
+        // Initially show all users
+        setVisibleUsers(new Set(members.map(m => m.id)));
+        setGroupMembers(members);
+
+        // Generate group-specific colors for all members
+        const updatedColors: UserColors = {};
+        members.forEach(member => {
+          updatedColors[member.id] = getUserColorForGroup(member.id, selectedGroupId);
+        });
+        setUserColors(updatedColors);
+        
+      } catch (error) {
+        console.error('Error fetching group members:', error);
+        setGroupMembersList([]);
+        setVisibleUsers(new Set());
+      }
+    };
+
+    fetchGroupMembers();
+  }, [selectedGroupId, user?.id]);
+
   // Load calendar settings
   useEffect(() => {
     setCalendarSettings(getCalendarSettings());
@@ -338,34 +440,20 @@ const Index = () => {
   };
 
   const updateUserColor = async (newColor: string) => {
-    if (!user?.id) return;
+    if (!user?.id || !selectedGroupId) return;
     
-    // Check against currently loaded colors (DB-backed)
-    const taken = Object.entries(userColors).some(([uid, c]) => uid !== user.id && typeof c === 'string' && c.toLowerCase() === newColor.toLowerCase());
-    if (taken) {
+    // Check if color is taken in this group
+    if (isColorTakenInGroup(newColor, selectedGroupId, user.id)) {
       toast({
         title: "Color already taken",
-        description: "Another user is already using this color. Please choose a different one.",
+        description: "Another user is already using this color in this group. Please choose a different one.",
         variant: "destructive"
       });
       return;
     }
 
-    // Persist to DB
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ color: newColor })
-        .eq('user_id', user.id);
-      if (error) throw error;
-    } catch (e) {
-      toast({ title: 'Failed to save color', description: 'Please try again.', variant: 'destructive' });
-      return;
-    }
-
-    // Persist locally for quick access/fallback
-    const updatedMap = { ...getUserColors(), [user.id]: newColor };
-    saveUserColors(updatedMap);
+    // Update group-specific color
+    setUserColorForGroup(user.id, selectedGroupId, newColor);
     setUserColor(newColor);
     setUserColors(prev => ({ ...prev, [user.id]: newColor }));
     
@@ -374,7 +462,7 @@ const Index = () => {
     
     toast({
       title: "Color updated",
-      description: "Your color has been successfully updated!"
+      description: "Your color for this group has been successfully updated!"
     });
   };
 
@@ -677,7 +765,7 @@ const Index = () => {
                           <div 
                             className="w-3 h-3 rounded-full" 
                             style={{ 
-                              backgroundColor: (userColors[member.id] || getUserColor(member.id)),
+                              backgroundColor: selectedGroupId ? getUserColorForGroup(member.id, selectedGroupId) : getUserColor(member.id),
                               opacity: visibleUsers.has(member.id) ? 1 : 0.3
                             }}
                           />
@@ -705,7 +793,7 @@ const Index = () => {
                       Your Color
                     </CardTitle>
                   <CardDescription>
-                    Choose a unique color for all your events
+                    Choose a unique color for your events in this group
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -716,21 +804,21 @@ const Index = () => {
                     >
                       <input
                         type="color"
-                        value={userColor}
+                        value={selectedGroupId && user?.id ? getUserColorForGroup(user.id, selectedGroupId) : userColor}
                         onChange={(e) => updateUserColor(e.target.value)}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                       />
                       <div 
                         className="w-full h-full rounded-lg"
-                        style={{ backgroundColor: userColor }}
+                        style={{ backgroundColor: selectedGroupId && user?.id ? getUserColorForGroup(user.id, selectedGroupId) : userColor }}
                       />
                     </div>
                     <div className="flex-1">
                       <p className="text-sm font-medium text-gray-900">
-                        {userColor.toUpperCase()}
+                        {(selectedGroupId && user?.id ? getUserColorForGroup(user.id, selectedGroupId) : userColor).toUpperCase()}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Each user must have a unique color
+                        Each user must have a unique color in this group
                       </p>
                     </div>
                   </div>
@@ -879,6 +967,7 @@ const Index = () => {
                       endHour={getGroupTimeSettings(selectedGroupId).endHour}
                       weekStartDay={getGroupTimeSettings(selectedGroupId).weekStartDay}
                       userColors={userColors}
+                      getUserColorForGroup={getUserColorForGroup}
                     />
                   </div>
                 </div>

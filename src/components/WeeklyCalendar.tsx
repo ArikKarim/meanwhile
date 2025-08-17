@@ -28,6 +28,7 @@ interface WeeklyCalendarProps {
   endHour?: number;
   weekStartDay?: 'sunday' | 'monday';
   userColors?: UserColors;
+  getUserColorForGroup?: (userId: string, groupId: string) => string;
 }
 
 const DAYS_SUNDAY_START = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -296,7 +297,7 @@ const getDisplayName = (user: StoredUser | undefined): string => {
   return user.username;
 };
 
-const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHour = 21, weekStartDay = 'sunday', userColors: propUserColors }: WeeklyCalendarProps) => {
+const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHour = 21, weekStartDay = 'sunday', userColors: propUserColors, getUserColorForGroup }: WeeklyCalendarProps) => {
   // Get the correct days array based on week start preference
   const DAYS = weekStartDay === 'monday' ? DAYS_MONDAY_START : DAYS_SUNDAY_START;
   
@@ -416,7 +417,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     try {
       const updates = {
         ...editForm,
-        color: userColors[user?.id || ''] || getUserColor(user?.id || '') // Always use UUID-based color for consistency
+        color: (getUserColorForGroup && user?.id) ? getUserColorForGroup(user.id, groupId) : (userColors[user?.id || ''] || getUserColor(user?.id || '')) // Always use group-specific or UUID-based color for consistency
       };
       
       const result = await updateTimeBlock(editingBlock.id, updates);
@@ -539,7 +540,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       day_of_week: getStorageDayIndex(dayIndex), // Convert UI day index to storage day index
       start_time: startTime,
       end_time: endTime,
-      color: userColors[user.id] || getUserColor(user.id),
+      color: (getUserColorForGroup && user?.id) ? getUserColorForGroup(user.id, groupId) : (userColors[user.id] || getUserColor(user.id)),
       tag: 'class',
       created_at: new Date().toISOString()
     };
@@ -1112,7 +1113,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                 
                 // Get current user color (always use UUID-based color for consistency)
                 // Always color by the block owner's chosen color
-                const currentUserColor = (userColors && userColors[block.user_id]) || getUserColor(block.user_id);
+                const currentUserColor = (getUserColorForGroup && block.user_id) ? getUserColorForGroup(block.user_id, groupId) : ((userColors && userColors[block.user_id]) || getUserColor(block.user_id));
                 
                 // Only show warning for personal overlaps (same user)
                 const showWarning = selfOverlap;
