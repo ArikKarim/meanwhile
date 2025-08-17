@@ -116,19 +116,32 @@ const ensureUserColorInDatabase = async (userId: string, groupId: string): Promi
       return existingColor.color;
     }
     
-    // Use database function to assign color if not found
-    const { data: assignedColor, error: assignError } = await supabase
-      .rpc('assign_user_color_in_group', {
-        p_user_id: userId,
-        p_group_id: groupId
-      });
-    
-    if (assignError) {
-      console.error('Error auto-assigning color:', assignError);
-      return getUserColor(userId);
+    // Try to use database function to assign color if not found
+    try {
+      const { data: assignedColor, error: assignError } = await supabase
+        .rpc('assign_user_color_in_group', {
+          p_user_id: userId,
+          p_group_id: groupId
+        });
+      
+      if (!assignError && assignedColor) {
+        return assignedColor;
+      }
+      
+      console.warn('Database function failed, using fallback color assignment:', assignError);
+    } catch (rpcError) {
+      console.warn('RPC function not available, using fallback color assignment:', rpcError);
     }
     
-    return assignedColor || getUserColor(userId);
+    // Fallback: create a basic database entry with hash-based color
+    const fallbackColor = getUserColor(userId);
+    const success = await setUserColorForGroup(userId, groupId, fallbackColor);
+    
+    if (success) {
+      return fallbackColor;
+    }
+    
+    return fallbackColor;
   } catch (error) {
     console.error('Error ensuring user color in database:', error);
     return getUserColor(userId);
@@ -145,30 +158,55 @@ const getUserColorForGroupSync = (userId: string, groupColors: {[userId: string]
 
 const setUserColorForGroup = async (userId: string, groupId: string, color: string): Promise<boolean> => {
   try {
-    // Get user name from profiles
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('username')
-      .eq('user_id', userId)
-      .single();
-    
-    if (profileError) {
-      console.error('Error fetching user profile:', profileError);
-      return false;
+    // Try to get user name from profiles, but don't fail if it doesn't work
+    let userName = 'Unknown User';
+    try {
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('user_id', userId)
+        .single();
+      
+      if (!profileError && profileData?.username) {
+        userName = profileData.username;
+      }
+    } catch (profileErr) {
+      console.warn('Could not fetch user profile for color update, using default name:', profileErr);
     }
     
-    const userName = profileData?.username || 'Unknown User';
+    // Try to upsert with user_name first
+    let upsertData: any = {
+      user_id: userId,
+      group_id: groupId,
+      color: color,
+      user_name: userName
+    };
     
-    const { error } = await supabase
+    let { error } = await supabase
       .from('user_group_colors')
-      .upsert({
+      .upsert(upsertData);
+    
+    // If error mentions user_name column doesn't exist, try without it
+    if (error && error.message && error.message.includes('user_name')) {
+      console.warn('user_name column not found, trying without it:', error.message);
+      upsertData = {
         user_id: userId,
         group_id: groupId,
-        color: color,
-        user_name: userName
-      });
+        color: color
+      };
+      
+      const retryResult = await supabase
+        .from('user_group_colors')
+        .upsert(upsertData);
+      
+      error = retryResult.error;
+    }
     
-    if (error) throw error;
+    if (error) {
+      console.error('Error upserting user color:', error);
+      throw error;
+    }
+    
     return true;
   } catch (error) {
     console.error('Error setting user color for group:', error);
@@ -584,15 +622,23 @@ const Index = () => {
   };
 
   const updateUserColor = async (newColor: string) => {
-    if (!user?.id || !selectedGroupId) return;
+    if (!user?.id || !selectedGroupId) {
+      console.error('Missing user ID or group ID for color update');
+      return;
+    }
+    
+    console.log('Starting color update:', { userId: user.id, groupId: selectedGroupId, newColor });
     
     try {
       // First ensure user has an entry in the database (this creates it if it doesn't exist)
+      console.log('Ensuring user color in database...');
       await ensureUserColorInDatabase(user.id, selectedGroupId);
       
       // Check if color is taken in this group
+      console.log('Checking if color is taken...');
       const colorTaken = await isColorTakenInGroup(newColor, selectedGroupId, user.id);
       if (colorTaken) {
+        console.log('Color is already taken by another user');
         toast({
           title: "Color already taken",
           description: "Another user is already using this color in this group. Please choose a different one.",
@@ -602,15 +648,19 @@ const Index = () => {
       }
 
       // Update group-specific color in database
+      console.log('Saving color to database...');
       const success = await setUserColorForGroup(user.id, selectedGroupId, newColor);
       if (!success) {
+        console.error('Failed to save color to database');
         toast({
           title: "Error updating color",
-          description: "Failed to save color. Please try again.",
+          description: "Failed to save color. Please try again. Check browser console for details.",
           variant: "destructive"
         });
         return;
       }
+
+      console.log('Color saved successfully, updating UI...');
 
       // Update local state immediately for better UX
       setUserColor(newColor);
@@ -625,6 +675,7 @@ const Index = () => {
       // Dispatch custom event to notify other components
       window.dispatchEvent(new CustomEvent('userColorChanged'));
       
+      console.log('Color update completed successfully');
       toast({
         title: "Color updated",
         description: "Your color for this group has been successfully updated!"
@@ -633,7 +684,7 @@ const Index = () => {
       console.error('Error in updateUserColor:', error);
       toast({
         title: "Error updating color",
-        description: "An unexpected error occurred. Please try again.",
+        description: `An unexpected error occurred: ${error instanceof Error ? error.message : 'Unknown error'}. Check browser console for details.`,
         variant: "destructive"
       });
     }
