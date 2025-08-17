@@ -156,19 +156,36 @@ const getUserColorForGroupSync = (userId: string, groupColors: {[userId: string]
   return getUserColor(userId); // fallback
 };
 
-const setUserColorForGroup = async (userId: string, groupId: string, color: string): Promise<boolean> => {
+const setUserColorForGroup = async (userId: string, groupId: string, color: string): Promise<{ success: boolean; error?: string }> => {
   try {
     const normalized = (color || '').toLowerCase();
+    console.log('Calling set_user_color RPC with:', { p_user_id: userId, p_group_id: groupId, p_color: normalized });
+    
     const { data, error } = await supabase.rpc('set_user_color', {
       p_user_id: userId,
       p_group_id: groupId,
       p_color: normalized,
     });
-    if (error) throw error;
-    return typeof data === 'string' && data.length > 0;
+    
+    if (error) {
+      console.error('RPC error:', error);
+      
+      // Handle specific error cases
+      if (error.message?.includes('color_taken')) {
+        return { success: false, error: 'color_taken' };
+      }
+      if (error.message?.includes('not_group_member')) {
+        return { success: false, error: 'not_group_member' };
+      }
+      
+      return { success: false, error: error.message || 'Unknown error' };
+    }
+    
+    console.log('RPC success, returned color:', data);
+    return { success: true };
   } catch (error) {
     console.error('Error setting user color via RPC:', error);
-    return false;
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 };
 
@@ -503,35 +520,7 @@ const Index = () => {
     };
   }, [selectedGroupId, user?.id]);
 
-  // Manual refresh function for colors (useful for debugging)
-  const refreshGroupColors = async () => {
-    if (!selectedGroupId) return;
-    
-    try {
-      const updatedGroupColors = await fetchGroupColors(selectedGroupId);
-      setGroupColors(updatedGroupColors);
-      setUserColors(updatedGroupColors);
-      
-      // Update current user's color state
-      if (user?.id && updatedGroupColors[user.id]) {
-        setUserColor(updatedGroupColors[user.id]);
-      }
-      
-      console.log('Manually refreshed group colors:', updatedGroupColors);
-      
-      toast({
-        title: "Colors refreshed",
-        description: "Group colors have been updated from the database."
-      });
-    } catch (error) {
-      console.error('Error refreshing group colors:', error);
-      toast({
-        title: "Error refreshing colors",
-        description: "Failed to refresh colors from database.",
-        variant: "destructive"
-      });
-    }
-  };
+
 
   // Load calendar settings
   useEffect(() => {
@@ -588,31 +577,36 @@ const Index = () => {
     console.log('Starting color update:', { userId: user.id, groupId: selectedGroupId, newColor: normalizedColor });
     
     try {
-      // First ensure user has an entry in the database (this creates it if it doesn't exist)
-      console.log('Ensuring user color in database...');
-      await ensureUserColorInDatabase(user.id, selectedGroupId);
+      // Update group-specific color using the atomic RPC
+      console.log('Saving color to database via RPC...');
+      const result = await setUserColorForGroup(user.id, selectedGroupId, normalizedColor);
       
-      // Check if color is taken in this group
-      console.log('Checking if color is taken...');
-      const colorTaken = await isColorTakenInGroup(normalizedColor, selectedGroupId, user.id);
-      if (colorTaken) {
-        console.log('Color is already taken by another user');
-        toast({
-          title: "Color already taken",
-          description: "Another user is already using this color in this group. Please choose a different one.",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      // Update group-specific color in database
-      console.log('Saving color to database...');
-      const success = await setUserColorForGroup(user.id, selectedGroupId, normalizedColor);
-      if (!success) {
-        console.error('Failed to save color to database');
+      if (!result.success) {
+        console.error('Failed to save color to database:', result.error);
+        
+        // Handle specific error cases
+        if (result.error === 'color_taken') {
+          toast({
+            title: "Color already taken",
+            description: "Another user is already using this color in this group. Please choose a different one.",
+            variant: "destructive"
+          });
+          return;
+        }
+        
+        if (result.error === 'not_group_member') {
+          toast({
+            title: "Access denied",
+            description: "You must be a member of this group to change colors.",
+            variant: "destructive"
+          });
+          return;
+        }
+        
+        // Generic error
         toast({
           title: "Error updating color",
-          description: "Failed to save color. Please try again. Check browser console for details.",
+          description: `Failed to save color: ${result.error}`,
           variant: "destructive"
         });
         return;
@@ -626,9 +620,13 @@ const Index = () => {
       setGroupColors(prev => ({ ...prev, [user.id]: normalizedColor }));
       
       // Refresh group colors from database to ensure consistency
-      const updatedGroupColors = await fetchGroupColors(selectedGroupId);
-      setGroupColors(updatedGroupColors);
-      setUserColors(updatedGroupColors);
+      try {
+        const updatedGroupColors = await fetchGroupColors(selectedGroupId);
+        setGroupColors(updatedGroupColors);
+        setUserColors(updatedGroupColors);
+      } catch (fetchError) {
+        console.warn('Could not refresh group colors, but color update succeeded:', fetchError);
+      }
       
       // Dispatch custom event to notify other components
       window.dispatchEvent(new CustomEvent('userColorChanged'));
@@ -636,7 +634,7 @@ const Index = () => {
       console.log('Color update completed successfully');
       toast({
         title: "Color updated",
-        description: "Your color for this group has been successfully updated!"
+        description: "Your color has been updated successfully!"
       });
     } catch (error) {
       console.error('Error in updateUserColor:', error);
@@ -1069,14 +1067,6 @@ const Index = () => {
                               </div>
                             </DialogContent>
                           </Dialog>
-                        )}
-
-                        {/* Refresh Colors Button (for debugging) */}
-                        {selectedGroupId && (
-                          <Button variant="outline" size="sm" className="h-8" onClick={refreshGroupColors}>
-                            <Palette className="h-3 w-3 mr-1" />
-                            Refresh Colors
-                          </Button>
                         )}
 
                         {/* Time Settings Button */}
