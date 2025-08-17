@@ -98,6 +98,7 @@ const DEFAULT_COLORS = [
   '#6366f1', // Indigo
 ];
 
+// Simplified group-specific colors using localStorage for now
 const getUserColorForGroup = (userId: string, groupId: string): string => {
   const groupColors = getUserGroupColors();
   const key = `${userId}_${groupId}`;
@@ -116,11 +117,25 @@ const getUserColorForGroup = (userId: string, groupId: string): string => {
   return DEFAULT_COLORS[colorIndex];
 };
 
-const setUserColorForGroup = (userId: string, groupId: string, color: string) => {
-  const groupColors = getUserGroupColors();
-  const key = `${userId}_${groupId}`;
-  groupColors[key] = color;
-  saveUserGroupColors(groupColors);
+// Synchronous version that uses loaded state
+const getUserColorForGroupSync = (userId: string, groupColors: {[userId: string]: string}): string => {
+  if (groupColors[userId]) {
+    return groupColors[userId];
+  }
+  return DEFAULT_COLORS[0]; // fallback
+};
+
+const setUserColorForGroup = (userId: string, groupId: string, color: string): boolean => {
+  try {
+    const groupColors = getUserGroupColors();
+    const key = `${userId}_${groupId}`;
+    groupColors[key] = color;
+    saveUserGroupColors(groupColors);
+    return true;
+  } catch (error) {
+    console.error('Error setting user color for group:', error);
+    return false;
+  }
 };
 
 const isColorTakenInGroup = (color: string, groupId: string, excludeUserId?: string): boolean => {
@@ -272,6 +287,7 @@ const Index = () => {
   const [copyLoading, setCopyLoading] = useState(false);
   const [userGroups, setUserGroups] = useState<Array<{id: string, name: string}>>([]);
   const [groupMembersList, setGroupMembersList] = useState<Array<{id: string, username: string, firstName?: string, lastName?: string}>>([]);
+  const [groupColors, setGroupColors] = useState<{[userId: string]: string}>({});
   const [isAdmin, setIsAdmin] = useState(false);
   // Realtime color updates
   const [colorChannelActive, setColorChannelActive] = useState(false);
@@ -331,10 +347,12 @@ const Index = () => {
         
         if (error) throw error;
         
-        const groups = memberData?.map(m => ({
+        const groups = memberData?.map((m: any) => ({
           id: m.groups.id,
           name: m.groups.name
         })) || [];
+        
+        console.log('Fetched user groups:', groups);
         
         setUserGroups(groups);
       } catch (error) {
@@ -379,10 +397,16 @@ const Index = () => {
 
         // Generate group-specific colors for all members
         const updatedColors: UserColors = {};
+        const groupColors: {[userId: string]: string} = {};
+        
         members.forEach(member => {
-          updatedColors[member.id] = getUserColorForGroup(member.id, selectedGroupId);
+          const groupColor = getUserColorForGroup(member.id, selectedGroupId);
+          updatedColors[member.id] = groupColor;
+          groupColors[member.id] = groupColor;
         });
+        
         setUserColors(updatedColors);
+        setGroupColors(groupColors);
         
       } catch (error) {
         console.error('Error fetching group members:', error);
@@ -439,11 +463,12 @@ const Index = () => {
     });
   };
 
-  const updateUserColor = async (newColor: string) => {
+  const updateUserColor = (newColor: string) => {
     if (!user?.id || !selectedGroupId) return;
     
     // Check if color is taken in this group
-    if (isColorTakenInGroup(newColor, selectedGroupId, user.id)) {
+    const colorTaken = isColorTakenInGroup(newColor, selectedGroupId, user.id);
+    if (colorTaken) {
       toast({
         title: "Color already taken",
         description: "Another user is already using this color in this group. Please choose a different one.",
@@ -452,10 +477,21 @@ const Index = () => {
       return;
     }
 
-    // Update group-specific color
-    setUserColorForGroup(user.id, selectedGroupId, newColor);
+    // Update group-specific color in localStorage
+    const success = setUserColorForGroup(user.id, selectedGroupId, newColor);
+    if (!success) {
+      toast({
+        title: "Error updating color",
+        description: "Failed to save color. Please try again.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Update local state
     setUserColor(newColor);
     setUserColors(prev => ({ ...prev, [user.id]: newColor }));
+    setGroupColors(prev => ({ ...prev, [user.id]: newColor }));
     
     // Dispatch custom event to notify other components
     window.dispatchEvent(new CustomEvent('userColorChanged'));
@@ -765,7 +801,7 @@ const Index = () => {
                           <div 
                             className="w-3 h-3 rounded-full" 
                             style={{ 
-                              backgroundColor: selectedGroupId ? getUserColorForGroup(member.id, selectedGroupId) : getUserColor(member.id),
+                              backgroundColor: getUserColorForGroupSync(member.id, groupColors),
                               opacity: visibleUsers.has(member.id) ? 1 : 0.3
                             }}
                           />
@@ -804,18 +840,18 @@ const Index = () => {
                     >
                       <input
                         type="color"
-                        value={selectedGroupId && user?.id ? getUserColorForGroup(user.id, selectedGroupId) : userColor}
+                        value={selectedGroupId && user?.id ? getUserColorForGroupSync(user.id, groupColors) : userColor}
                         onChange={(e) => updateUserColor(e.target.value)}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                       />
                       <div 
                         className="w-full h-full rounded-lg"
-                        style={{ backgroundColor: selectedGroupId && user?.id ? getUserColorForGroup(user.id, selectedGroupId) : userColor }}
+                        style={{ backgroundColor: selectedGroupId && user?.id ? getUserColorForGroupSync(user.id, groupColors) : userColor }}
                       />
                     </div>
                     <div className="flex-1">
                       <p className="text-sm font-medium text-gray-900">
-                        {(selectedGroupId && user?.id ? getUserColorForGroup(user.id, selectedGroupId) : userColor).toUpperCase()}
+                        {(selectedGroupId && user?.id ? getUserColorForGroupSync(user.id, groupColors) : userColor).toUpperCase()}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Each user must have a unique color in this group
@@ -841,7 +877,7 @@ const Index = () => {
                       </h3>
                       <div className="flex items-center gap-3">
                         {/* Copy Schedule Button */}
-                        {selectedGroupId && userGroups.length > 1 && (
+                        {selectedGroupId && userGroups.length >= 1 && (
                           <Dialog open={showCopySchedule} onOpenChange={setShowCopySchedule}>
                             <DialogTrigger asChild>
                               <Button variant="outline" size="sm" className="h-8">
@@ -967,7 +1003,7 @@ const Index = () => {
                       endHour={getGroupTimeSettings(selectedGroupId).endHour}
                       weekStartDay={getGroupTimeSettings(selectedGroupId).weekStartDay}
                       userColors={userColors}
-                      getUserColorForGroup={getUserColorForGroup}
+                      groupColors={groupColors}
                     />
                   </div>
                 </div>
