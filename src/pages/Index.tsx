@@ -79,7 +79,7 @@ const getUserColor = (userId: string): string => {
   return DEFAULT_COLORS[colorIndex];
 };
 
-// Database-synced group-specific colors
+// Database-synced group-specific colors (read-only version)
 const getUserColorForGroup = async (userId: string, groupId: string): Promise<string> => {
   try {
     const { data, error } = await supabase
@@ -90,25 +90,48 @@ const getUserColorForGroup = async (userId: string, groupId: string): Promise<st
       .single();
     
     if (error || !data) {
-      // Auto-assign color using database function
-      const { data: assignedColor, error: assignError } = await supabase
-        .rpc('assign_user_color_in_group', {
-          p_user_id: userId,
-          p_group_id: groupId
-        });
-      
-      if (assignError) {
-        console.error('Error auto-assigning color:', assignError);
-        return DEFAULT_COLORS[0];
-      }
-      
-      return assignedColor || DEFAULT_COLORS[0];
+      // Return consistent hash-based color instead of creating database entry
+      return getUserColor(userId);
     }
     
     return data.color;
   } catch (error) {
     console.error('Error fetching user color for group:', error);
-    return DEFAULT_COLORS[0];
+    return getUserColor(userId);
+  }
+};
+
+// Function to ensure user has a color assigned in database (used when user changes color)
+const ensureUserColorInDatabase = async (userId: string, groupId: string): Promise<string> => {
+  try {
+    // Check if user already has a color in database
+    const { data: existingColor, error: fetchError } = await supabase
+      .from('user_group_colors')
+      .select('color')
+      .eq('user_id', userId)
+      .eq('group_id', groupId)
+      .single();
+    
+    if (!fetchError && existingColor) {
+      return existingColor.color;
+    }
+    
+    // Use database function to assign color if not found
+    const { data: assignedColor, error: assignError } = await supabase
+      .rpc('assign_user_color_in_group', {
+        p_user_id: userId,
+        p_group_id: groupId
+      });
+    
+    if (assignError) {
+      console.error('Error auto-assigning color:', assignError);
+      return getUserColor(userId);
+    }
+    
+    return assignedColor || getUserColor(userId);
+  } catch (error) {
+    console.error('Error ensuring user color in database:', error);
+    return getUserColor(userId);
   }
 };
 
@@ -413,15 +436,15 @@ const Index = () => {
         // Fetch group-specific colors from database
         const groupColorsFromDB = await fetchGroupColors(selectedGroupId);
         
-        // Ensure all members have colors assigned
+        // Use existing colors from database, fallback to consistent hash-based colors
         const updatedColors: UserColors = {};
         const finalGroupColors: {[userId: string]: string} = {};
         
         for (const member of members) {
           let memberColor = groupColorsFromDB[member.id];
           if (!memberColor) {
-            // Auto-assign color if not found
-            memberColor = await getUserColorForGroup(member.id, selectedGroupId);
+            // Use consistent hash-based color instead of random assignment
+            memberColor = getUserColor(member.id);
           }
           updatedColors[member.id] = memberColor;
           finalGroupColors[member.id] = memberColor;
@@ -564,6 +587,9 @@ const Index = () => {
     if (!user?.id || !selectedGroupId) return;
     
     try {
+      // First ensure user has an entry in the database (this creates it if it doesn't exist)
+      await ensureUserColorInDatabase(user.id, selectedGroupId);
+      
       // Check if color is taken in this group
       const colorTaken = await isColorTakenInGroup(newColor, selectedGroupId, user.id);
       if (colorTaken) {
