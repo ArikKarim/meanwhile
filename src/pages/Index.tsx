@@ -122,12 +122,27 @@ const getUserColorForGroupSync = (userId: string, groupColors: {[userId: string]
 
 const setUserColorForGroup = async (userId: string, groupId: string, color: string): Promise<boolean> => {
   try {
+    // Get user name from profiles
+    const { data: profileData, error: profileError } = await supabase
+      .from('profiles')
+      .select('username')
+      .eq('user_id', userId)
+      .single();
+    
+    if (profileError) {
+      console.error('Error fetching user profile:', profileError);
+      return false;
+    }
+    
+    const userName = profileData?.username || 'Unknown User';
+    
     const { error } = await supabase
       .from('user_group_colors')
       .upsert({
         user_id: userId,
         group_id: groupId,
-        color: color
+        color: color,
+        user_name: userName
       });
     
     if (error) throw error;
@@ -161,7 +176,7 @@ const fetchGroupColors = async (groupId: string): Promise<{[userId: string]: str
   try {
     const { data, error } = await supabase
       .from('user_group_colors')
-      .select('user_id, color')
+      .select('user_id, color, user_name')
       .eq('group_id', groupId);
     
     if (error) throw error;
@@ -169,6 +184,7 @@ const fetchGroupColors = async (groupId: string): Promise<{[userId: string]: str
     const colorMap: {[userId: string]: string} = {};
     data?.forEach(record => {
       colorMap[record.user_id] = record.color;
+      // Note: user_name is now available in record.user_name if needed for future features
     });
     
     return colorMap;

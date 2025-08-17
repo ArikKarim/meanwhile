@@ -159,6 +159,7 @@ export type Database = {
           user_id: string
           group_id: string
           color: string
+          user_name: string
           created_at: string
           updated_at: string
         }
@@ -167,6 +168,7 @@ export type Database = {
           user_id: string
           group_id: string
           color: string
+          user_name: string
           created_at?: string
           updated_at?: string
         }
@@ -175,6 +177,7 @@ export type Database = {
           user_id?: string
           group_id?: string
           color?: string
+          user_name?: string
           created_at?: string
           updated_at?: string
         }
