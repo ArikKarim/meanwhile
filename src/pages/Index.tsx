@@ -79,27 +79,35 @@ const getUserColor = (userId: string): string => {
   return DEFAULT_COLORS[colorIndex];
 };
 
-// Temporary localStorage-based system until migration runs
-const getUserColorForGroup = (userId: string, groupId: string): string => {
+// Database-synced group-specific colors
+const getUserColorForGroup = async (userId: string, groupId: string): Promise<string> => {
   try {
-    const stored = localStorage.getItem('meanwhile_user_group_colors');
-    const groupColors = stored ? JSON.parse(stored) : {};
-    const key = `${userId}_${groupId}`;
+    const { data, error } = await supabase
+      .from('user_group_colors')
+      .select('color')
+      .eq('user_id', userId)
+      .eq('group_id', groupId)
+      .single();
     
-    if (groupColors[key]) {
-      return groupColors[key];
+    if (error || !data) {
+      // Auto-assign color using database function
+      const { data: assignedColor, error: assignError } = await supabase
+        .rpc('assign_user_color_in_group', {
+          p_user_id: userId,
+          p_group_id: groupId
+        });
+      
+      if (assignError) {
+        console.error('Error auto-assigning color:', assignError);
+        return DEFAULT_COLORS[0];
+      }
+      
+      return assignedColor || DEFAULT_COLORS[0];
     }
     
-    // Auto-assign a color based on user ID and group ID hash
-    const combined = `${userId}${groupId}`;
-    const hashCode = combined.split('').reduce((a, b) => {
-      a = ((a << 5) - a) + b.charCodeAt(0);
-      return a & a;
-    }, 0);
-    const colorIndex = Math.abs(hashCode) % DEFAULT_COLORS.length;
-    return DEFAULT_COLORS[colorIndex];
+    return data.color;
   } catch (error) {
-    console.error('Error getting user color for group:', error);
+    console.error('Error fetching user color for group:', error);
     return DEFAULT_COLORS[0];
   }
 };
@@ -112,13 +120,17 @@ const getUserColorForGroupSync = (userId: string, groupColors: {[userId: string]
   return getUserColor(userId); // fallback
 };
 
-const setUserColorForGroup = (userId: string, groupId: string, color: string): boolean => {
+const setUserColorForGroup = async (userId: string, groupId: string, color: string): Promise<boolean> => {
   try {
-    const stored = localStorage.getItem('meanwhile_user_group_colors');
-    const groupColors = stored ? JSON.parse(stored) : {};
-    const key = `${userId}_${groupId}`;
-    groupColors[key] = color;
-    localStorage.setItem('meanwhile_user_group_colors', JSON.stringify(groupColors));
+    const { error } = await supabase
+      .from('user_group_colors')
+      .upsert({
+        user_id: userId,
+        group_id: groupId,
+        color: color
+      });
+    
+    if (error) throw error;
     return true;
   } catch (error) {
     console.error('Error setting user color for group:', error);
@@ -126,35 +138,37 @@ const setUserColorForGroup = (userId: string, groupId: string, color: string): b
   }
 };
 
-const isColorTakenInGroup = (color: string, groupId: string, excludeUserId?: string): boolean => {
+const isColorTakenInGroup = async (color: string, groupId: string, excludeUserId?: string): Promise<boolean> => {
   try {
-    const stored = localStorage.getItem('meanwhile_user_group_colors');
-    const groupColors = stored ? JSON.parse(stored) : {};
+    const { data, error } = await supabase
+      .from('user_group_colors')
+      .select('user_id')
+      .eq('group_id', groupId)
+      .eq('color', color)
+      .neq('user_id', excludeUserId || '');
     
-    return Object.entries(groupColors).some(([key, userColor]) => {
-      const [userId, keyGroupId] = key.split('_');
-      return keyGroupId === groupId && 
-             userId !== excludeUserId && 
-             (userColor as string).toLowerCase() === color.toLowerCase();
-    });
+    if (error) throw error;
+    
+    return (data && data.length > 0) || false;
   } catch (error) {
     console.error('Error checking if color is taken:', error);
     return false;
   }
 };
 
-// Fetch all group colors (localStorage version)
-const fetchGroupColors = (groupId: string): {[userId: string]: string} => {
+// Fetch all group colors from database
+const fetchGroupColors = async (groupId: string): Promise<{[userId: string]: string}> => {
   try {
-    const stored = localStorage.getItem('meanwhile_user_group_colors');
-    const allGroupColors = stored ? JSON.parse(stored) : {};
+    const { data, error } = await supabase
+      .from('user_group_colors')
+      .select('user_id, color')
+      .eq('group_id', groupId);
+    
+    if (error) throw error;
     
     const colorMap: {[userId: string]: string} = {};
-    Object.entries(allGroupColors).forEach(([key, color]) => {
-      const [userId, keyGroupId] = key.split('_');
-      if (keyGroupId === groupId) {
-        colorMap[userId] = color as string;
-      }
+    data?.forEach(record => {
+      colorMap[record.user_id] = record.color;
     });
     
     return colorMap;
@@ -288,24 +302,13 @@ const Index = () => {
   // Realtime color updates
   const [colorChannelActive, setColorChannelActive] = useState(false);
 
-  // Initialize user color and load from database/localStorage
+  // Initialize user color
   useEffect(() => {
     const loadColors = async () => {
       if (user?.id) {
-        try {
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('color')
-            .eq('user_id', user.id)
-            .single();
-          const dbColor = data?.color;
-          const effectiveColor = (typeof dbColor === 'string' && dbColor.length > 0) ? dbColor : getUserColor(user.id);
-          setUserColor(effectiveColor);
-          setUserColors(prev => ({ ...prev, [user.id!]: effectiveColor }));
-        } catch {
-          // Fallback to local storage
-          setUserColor(getUserColor(user.id));
-        }
+        // Set default user color for fallback
+        setUserColor(getUserColor(user.id));
+        setUserColors(prev => ({ ...prev, [user.id!]: getUserColor(user.id) }));
       }
       // Do not override member map with local storage; only use local for unknown users
     };
@@ -391,22 +394,22 @@ const Index = () => {
         setVisibleUsers(new Set(members.map(m => m.id)));
         setGroupMembers(members);
 
-        // Fetch group-specific colors from localStorage
-        const groupColorsFromStorage = fetchGroupColors(selectedGroupId);
+        // Fetch group-specific colors from database
+        const groupColorsFromDB = await fetchGroupColors(selectedGroupId);
         
         // Ensure all members have colors assigned
         const updatedColors: UserColors = {};
         const finalGroupColors: {[userId: string]: string} = {};
         
-        members.forEach(member => {
-          let memberColor = groupColorsFromStorage[member.id];
+        for (const member of members) {
+          let memberColor = groupColorsFromDB[member.id];
           if (!memberColor) {
             // Auto-assign color if not found
-            memberColor = getUserColorForGroup(member.id, selectedGroupId);
+            memberColor = await getUserColorForGroup(member.id, selectedGroupId);
           }
           updatedColors[member.id] = memberColor;
           finalGroupColors[member.id] = memberColor;
-        });
+        }
         
         setUserColors(updatedColors);
         setGroupColors(finalGroupColors);
@@ -421,7 +424,37 @@ const Index = () => {
     fetchGroupMembers();
   }, [selectedGroupId, user?.id]);
 
+  // Real-time subscription for group color changes
+  useEffect(() => {
+    if (!selectedGroupId) return;
 
+    const subscription = supabase
+      .channel(`group_colors:${selectedGroupId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'user_group_colors',
+          filter: `group_id=eq.${selectedGroupId}`
+        },
+        async (payload) => {
+          console.log('Color change detected:', payload);
+          
+          // Refresh group colors when any color changes in this group
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE' || payload.eventType === 'DELETE') {
+            const updatedGroupColors = await fetchGroupColors(selectedGroupId);
+            setGroupColors(updatedGroupColors);
+            setUserColors(updatedGroupColors);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [selectedGroupId]);
 
   // Load calendar settings
   useEffect(() => {
@@ -468,11 +501,11 @@ const Index = () => {
     });
   };
 
-  const updateUserColor = (newColor: string) => {
+  const updateUserColor = async (newColor: string) => {
     if (!user?.id || !selectedGroupId) return;
     
     // Check if color is taken in this group
-    const colorTaken = isColorTakenInGroup(newColor, selectedGroupId, user.id);
+    const colorTaken = await isColorTakenInGroup(newColor, selectedGroupId, user.id);
     if (colorTaken) {
       toast({
         title: "Color already taken",
@@ -482,8 +515,8 @@ const Index = () => {
       return;
     }
 
-    // Update group-specific color in localStorage
-    const success = setUserColorForGroup(user.id, selectedGroupId, newColor);
+    // Update group-specific color in database
+    const success = await setUserColorForGroup(user.id, selectedGroupId, newColor);
     if (!success) {
       toast({
         title: "Error updating color",
@@ -630,36 +663,7 @@ const Index = () => {
     }
   };
 
-  // Realtime subscription: reflect profile color changes immediately
-  useEffect(() => {
-    // Only when we have a group selected and some members loaded
-    if (!selectedGroupId || groupMembers.length === 0) return;
 
-    // Avoid duplicate subscriptions
-    if (colorChannelActive) return;
-
-    const channel = supabase
-      .channel('profiles-color-updates')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles' }, (payload: any) => {
-        const newUserId = payload?.new?.user_id;
-        const newColor = payload?.new?.color;
-        if (!newUserId || typeof newColor !== 'string') return;
-        // Only update if this user is part of current group
-        const isMember = groupMembers.some((m: any) => m.id === newUserId);
-        if (!isMember) return;
-        setUserColors(prev => ({ ...prev, [newUserId]: newColor }));
-        if (user?.id === newUserId) setUserColor(newColor);
-      })
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') setColorChannelActive(true);
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-      setColorChannelActive(false);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedGroupId, groupMembers.map((m: any) => m.id).join(','), user?.id]);
 
   // Check admin status when group changes
   useEffect(() => {

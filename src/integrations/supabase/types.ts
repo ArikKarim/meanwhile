@@ -76,7 +76,6 @@ export type Database = {
           first_name: string | null
           id: string
           last_name: string | null
-          color: string | null
           password_hash: string | null
           updated_at: string
           user_id: string
@@ -87,7 +86,6 @@ export type Database = {
           first_name?: string | null
           id?: string
           last_name?: string | null
-          color?: string | null
           password_hash?: string | null
           updated_at?: string
           user_id: string
@@ -98,7 +96,6 @@ export type Database = {
           first_name?: string | null
           id?: string
           last_name?: string | null
-          color?: string | null
           password_hash?: string | null
           updated_at?: string
           user_id?: string
@@ -156,13 +153,62 @@ export type Database = {
           },
         ]
       }
+      user_group_colors: {
+        Row: {
+          id: string
+          user_id: string
+          group_id: string
+          color: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          group_id: string
+          color: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          group_id?: string
+          color?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_group_colors_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      assign_user_color_in_group: {
+        Args: {
+          p_user_id: string
+          p_group_id: string
+          p_preferred_color?: string
+        }
+        Returns: string
+      }
       generate_group_code: {
         Args: Record<PropertyKey, never>
+        Returns: string
+      }
+      get_user_most_recent_color: {
+        Args: {
+          p_user_id: string
+        }
         Returns: string
       }
     }
