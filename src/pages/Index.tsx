@@ -158,61 +158,16 @@ const getUserColorForGroupSync = (userId: string, groupColors: {[userId: string]
 
 const setUserColorForGroup = async (userId: string, groupId: string, color: string): Promise<boolean> => {
   try {
-    // Try to get user name from profiles, but don't fail if it doesn't work
-    let userName = 'Unknown User';
-    try {
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .select('username')
-        .eq('user_id', userId)
-        .single();
-      
-      if (!profileError && profileData?.username) {
-        userName = profileData.username;
-      }
-    } catch (profileErr) {
-      console.warn('Could not fetch user profile for color update, using default name:', profileErr);
-    }
-
-    // Always normalize color to lowercase for consistency and uniqueness checks
-    const normalizedColor = (color || '').toLowerCase();
-    
-    // Try to upsert with user_name first
-    let upsertData: any = {
-      user_id: userId,
-      group_id: groupId,
-      color: normalizedColor,
-      user_name: userName
-    };
-    
-    let { error } = await supabase
-      .from('user_group_colors')
-      .upsert(upsertData, { onConflict: 'user_id,group_id' });
-    
-    // If error mentions user_name column doesn't exist, try without it
-    if (error && error.message && error.message.includes('user_name')) {
-      console.warn('user_name column not found, trying without it:', error.message);
-      upsertData = {
-        user_id: userId,
-        group_id: groupId,
-        color: normalizedColor
-      };
-      
-      const retryResult = await supabase
-        .from('user_group_colors')
-        .upsert(upsertData, { onConflict: 'user_id,group_id' });
-      
-      error = retryResult.error;
-    }
-    
-    if (error) {
-      console.error('Error upserting user color:', error);
-      throw error;
-    }
-    
-    return true;
+    const normalized = (color || '').toLowerCase();
+    const { data, error } = await supabase.rpc('set_user_color', {
+      p_user_id: userId,
+      p_group_id: groupId,
+      p_color: normalized,
+    });
+    if (error) throw error;
+    return typeof data === 'string' && data.length > 0;
   } catch (error) {
-    console.error('Error setting user color for group:', error);
+    console.error('Error setting user color via RPC:', error);
     return false;
   }
 };
@@ -220,19 +175,13 @@ const setUserColorForGroup = async (userId: string, groupId: string, color: stri
 const isColorTakenInGroup = async (color: string, groupId: string, excludeUserId?: string): Promise<boolean> => {
   try {
     const normalizedColor = (color || '').toLowerCase();
-    let query = supabase
+    const { data, error } = await supabase
       .from('user_group_colors')
       .select('user_id')
       .eq('group_id', groupId)
-      .eq('color', normalizedColor);
-
-    if (excludeUserId) {
-      query = query.neq('user_id', excludeUserId);
-    }
-
-    const { data, error } = await query;
+      .filter('color', 'ilike', normalizedColor)
+      .neq('user_id', excludeUserId || '');
     if (error) throw error;
-    
     return (data && data.length > 0) || false;
   } catch (error) {
     console.error('Error checking if color is taken:', error);

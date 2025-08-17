@@ -196,6 +196,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      set_user_color: {
+        Args: {
+          p_user_id: string
+          p_group_id: string
+          p_color: string
+        }
+        Returns: string
+      }
       assign_user_color_in_group: {
         Args: {
           p_user_id: string
