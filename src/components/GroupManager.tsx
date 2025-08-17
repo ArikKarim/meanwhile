@@ -155,89 +155,7 @@ const generateGroupCode = (): string => {
   return result;
 };
 
-const copyScheduleToGroup = async (sourceGroupId: string, targetGroupId: string, userId: string): Promise<boolean> => {
-  try {
-    // Get all time blocks for the user in the source group
-    const { data: sourceTimeBlocks, error: fetchError } = await supabase
-      .from('time_blocks')
-      .select('*')
-      .eq('group_id', sourceGroupId)
-      .eq('user_id', userId);
 
-    if (fetchError) throw fetchError;
-
-    if (!sourceTimeBlocks || sourceTimeBlocks.length === 0) {
-      throw new Error('No schedules found in the source group to copy.');
-    }
-
-    // Check for existing schedules in target group that might overlap
-    const { data: targetTimeBlocks, error: targetFetchError } = await supabase
-      .from('time_blocks')
-      .select('*')
-      .eq('group_id', targetGroupId)
-      .eq('user_id', userId);
-
-    if (targetFetchError) throw targetFetchError;
-
-    // Prepare new time blocks for insertion (remove id and created_at, update group_id)
-    const newTimeBlocks = sourceTimeBlocks.map(block => ({
-      user_id: block.user_id,
-      group_id: targetGroupId,
-      label: block.label,
-      day_of_week: block.day_of_week,
-      start_time: block.start_time,
-      end_time: block.end_time,
-      color: block.color,
-      tag: block.tag
-    }));
-
-    // Check for overlaps with existing blocks in target group
-    const overlaps: any[] = [];
-    if (targetTimeBlocks && targetTimeBlocks.length > 0) {
-      newTimeBlocks.forEach(newBlock => {
-        targetTimeBlocks.forEach(existingBlock => {
-          if (newBlock.day_of_week === existingBlock.day_of_week) {
-            const newStart = timeToMinutes(newBlock.start_time);
-            const newEnd = timeToMinutes(newBlock.end_time);
-            const existingStart = timeToMinutes(existingBlock.start_time);
-            const existingEnd = timeToMinutes(existingBlock.end_time);
-            
-            // Check for overlap
-            if (newStart < existingEnd && existingStart < newEnd) {
-              overlaps.push({
-                new: newBlock,
-                existing: existingBlock
-              });
-            }
-          }
-        });
-      });
-    }
-
-    if (overlaps.length > 0) {
-      throw new Error(`Cannot copy schedules: ${overlaps.length} time conflict(s) detected with your existing schedule in the target group.`);
-    }
-
-    // Insert the new time blocks
-    const { data: insertedBlocks, error: insertError } = await supabase
-      .from('time_blocks')
-      .insert(newTimeBlocks)
-      .select();
-
-    if (insertError) throw insertError;
-
-    return true;
-  } catch (error) {
-    console.error('Error copying schedule:', error);
-    throw error;
-  }
-};
-
-// Helper function to convert time to minutes (duplicate from ScheduleForm for consistency)
-const timeToMinutes = (timeString: string): number => {
-  const [hours, minutes] = timeString.split(':').map(Number);
-  return hours * 60 + minutes;
-};
 
 const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => {
   const { user } = useAuth();
@@ -246,10 +164,7 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
   const [loading, setLoading] = useState(true);
   const [createLoading, setCreateLoading] = useState(false);
   const [joinLoading, setJoinLoading] = useState(false);
-  const [showCopyDialog, setShowCopyDialog] = useState(false);
-  const [sourceGroupId, setSourceGroupId] = useState<string>('');
-  const [targetGroupId, setTargetGroupId] = useState<string>('');
-  const [copyLoading, setCopyLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("groups");
 
   useEffect(() => {
     if (user) {
@@ -541,12 +456,11 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <Tabs defaultValue="groups" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="groups">My Groups</TabsTrigger>
             <TabsTrigger value="create">Create</TabsTrigger>
             <TabsTrigger value="join">Join</TabsTrigger>
-            <TabsTrigger value="copy">Copy Schedule</TabsTrigger>
           </TabsList>
           
           <TabsContent value="groups" className="mt-4">
@@ -662,80 +576,7 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
             </form>
           </TabsContent>
 
-          <TabsContent value="copy" className="mt-4">
-            <div className="space-y-4">
-              <div className="text-sm text-muted-foreground">
-                Copy your schedule from one group to another. This will duplicate all your time blocks.
-              </div>
-              
-              {groups.length < 2 ? (
-                <div className="text-center py-8">
-                  <CalendarDays className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">
-                    You need to be in at least 2 groups to copy schedules between them.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="sourceGroup">Copy From (Source Group)</Label>
-                    <Select value={sourceGroupId} onValueChange={setSourceGroupId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select source group" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {groups.map((group) => (
-                          <SelectItem key={group.id} value={group.id}>
-                            {group.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="targetGroup">Copy To (Target Group)</Label>
-                    <Select value={targetGroupId} onValueChange={setTargetGroupId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select target group" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {groups
-                          .filter(group => group.id !== sourceGroupId)
-                          .map((group) => (
-                            <SelectItem key={group.id} value={group.id}>
-                              {group.name}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm">
-                    <div className="font-medium text-yellow-800 mb-1">⚠️ Important Notes:</div>
-                    <ul className="text-yellow-700 space-y-1 list-disc list-inside">
-                      <li>This will copy ALL your time blocks from the source group</li>
-                      <li>The copy will fail if any time conflicts are detected</li>
-                      <li>Your color preferences will be maintained</li>
-                    </ul>
-                  </div>
-
-                  <Button 
-                    onClick={handleCopySchedule}
-                    className="w-full" 
-                    disabled={copyLoading || !sourceGroupId || !targetGroupId}
-                  >
-                    {copyLoading ? 'Copying...' : (
-                      <>
-                        <CalendarDays className="h-4 w-4 mr-2" />
-                        Copy Schedule
-                      </>
-                    )}
-                  </Button>
-                </div>
-              )}
-            </div>
-          </TabsContent>
         </Tabs>
       </CardContent>
     </Card>

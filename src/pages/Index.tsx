@@ -8,7 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { LogOut, Calendar, Users, Settings, Palette, Eye, EyeOff, Clock } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { LogOut, Calendar, Users, Settings, Palette, Eye, EyeOff, Clock, CalendarDays } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import GroupManager from '@/components/GroupManager';
@@ -213,6 +214,11 @@ const Index = () => {
   const [userColors, setUserColors] = useState<UserColors>({});
   const [calendarSettings, setCalendarSettings] = useState<CalendarSettings>({});
   const [showTimeSettings, setShowTimeSettings] = useState(false);
+  const [showCopySchedule, setShowCopySchedule] = useState(false);
+  const [sourceGroupId, setSourceGroupId] = useState<string>('');
+  const [targetGroupId, setTargetGroupId] = useState<string>('');
+  const [copyLoading, setCopyLoading] = useState(false);
+  const [userGroups, setUserGroups] = useState<Array<{id: string, name: string}>>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   // Realtime color updates
   const [colorChannelActive, setColorChannelActive] = useState(false);
@@ -254,6 +260,36 @@ const Index = () => {
 
     window.addEventListener('userColorChanged', handleColorChange);
     return () => window.removeEventListener('userColorChanged', handleColorChange);
+  }, [user?.id]);
+
+  // Load user groups for copy functionality
+  useEffect(() => {
+    const fetchUserGroups = async () => {
+      if (!user?.id) return;
+      
+      try {
+        const { data: memberData, error } = await supabase
+          .from('group_members')
+          .select(`
+            group_id,
+            groups!inner(id, name)
+          `)
+          .eq('user_id', user.id);
+        
+        if (error) throw error;
+        
+        const groups = memberData?.map(m => ({
+          id: m.groups.id,
+          name: m.groups.name
+        })) || [];
+        
+        setUserGroups(groups);
+      } catch (error) {
+        console.error('Error fetching user groups:', error);
+      }
+    };
+    
+    fetchUserGroups();
   }, [user?.id]);
 
   // Load calendar settings
@@ -342,75 +378,128 @@ const Index = () => {
     });
   };
 
-  // Get group members for user filtering
-  const fetchGroupMembers = async (groupId: string) => {
+  // Helper function to convert time to minutes for overlap detection
+  const timeToMinutes = (timeString: string): number => {
+    const [hours, minutes] = timeString.split(':').map(Number);
+    return hours * 60 + minutes;
+  };
+
+  // Copy schedule functionality
+  const copyScheduleToGroup = async (sourceGroupId: string, targetGroupId: string, userId: string): Promise<boolean> => {
     try {
-      // Fetch group members from database
-      const { data: memberData, error } = await supabase
-        .from('group_members')
-        .select(`
-          user_id,
-          profiles!inner(user_id, username, first_name, last_name, color)
-        `)
-        .eq('group_id', groupId);
-      
-      if (error) {
-        console.error('Error fetching group members:', error);
-        return;
+      // Get all time blocks for the user in the source group
+      const { data: sourceTimeBlocks, error: fetchError } = await supabase
+        .from('time_blocks')
+        .select('*')
+        .eq('group_id', sourceGroupId)
+        .eq('user_id', userId);
+
+      if (fetchError) throw fetchError;
+
+      if (!sourceTimeBlocks || sourceTimeBlocks.length === 0) {
+        throw new Error('No schedules found in the source group to copy.');
       }
 
-      const groupMemberData = (memberData || []).map((member: any) => ({
-        id: member.user_id,
-        username: member.profiles.username,
-        firstName: member.profiles.first_name,
-        lastName: member.profiles.last_name,
-        color: member.profiles.color || undefined
-      }));
-      
-      setGroupMembers(groupMemberData);
-      // Initially show all users
-      setVisibleUsers(new Set(groupMemberData.map((member: any) => member.id)));
+      // Check for existing schedules in target group that might overlap
+      const { data: targetTimeBlocks, error: targetFetchError } = await supabase
+        .from('time_blocks')
+        .select('*')
+        .eq('group_id', targetGroupId)
+        .eq('user_id', userId);
 
-      // Fetch colors directly from profiles to avoid any JOIN inconsistencies
-      const memberIds = groupMemberData.map((m: any) => m.id);
-      let memberColors: UserColors = {};
-      if (memberIds.length > 0) {
-        try {
-          const { data: colorRows } = await supabase
-            .from('profiles')
-            .select('user_id, color')
-            .in('user_id', memberIds);
-          (colorRows || []).forEach((row: any) => {
-            if (row.user_id) {
-              memberColors[row.user_id] = row.color || getUserColor(row.user_id);
+      if (targetFetchError) throw targetFetchError;
+
+      // Prepare new time blocks for insertion (remove id and created_at, update group_id)
+      const newTimeBlocks = sourceTimeBlocks.map(block => ({
+        user_id: block.user_id,
+        group_id: targetGroupId,
+        label: block.label,
+        day_of_week: block.day_of_week,
+        start_time: block.start_time,
+        end_time: block.end_time,
+        color: block.color,
+        tag: block.tag
+      }));
+
+      // Check for overlaps with existing blocks in target group
+      const overlaps: any[] = [];
+      if (targetTimeBlocks && targetTimeBlocks.length > 0) {
+        newTimeBlocks.forEach(newBlock => {
+          targetTimeBlocks.forEach(existingBlock => {
+            if (newBlock.day_of_week === existingBlock.day_of_week) {
+              const newStart = timeToMinutes(newBlock.start_time);
+              const newEnd = timeToMinutes(newBlock.end_time);
+              const existingStart = timeToMinutes(existingBlock.start_time);
+              const existingEnd = timeToMinutes(existingBlock.end_time);
+              
+              // Check for overlap
+              if (newStart < existingEnd && existingStart < newEnd) {
+                overlaps.push({
+                  new: newBlock,
+                  existing: existingBlock
+                });
+              }
             }
           });
-        } catch (e) {
-          // Fallback if direct fetch fails
-          groupMemberData.forEach((m: any) => {
-            memberColors[m.id] = m.color || getUserColor(m.id);
-          });
-        }
+        });
       }
-      // Merge with current user if not included yet
-      if (user?.id && !memberColors[user.id]) {
-        memberColors[user.id] = userColor || getUserColor(user.id);
+
+      if (overlaps.length > 0) {
+        throw new Error(`Cannot copy schedules: ${overlaps.length} time conflict(s) detected with your existing schedule in the target group.`);
       }
-      setUserColors(memberColors);
+
+      // Insert the new time blocks
+      const { data: insertedBlocks, error: insertError } = await supabase
+        .from('time_blocks')
+        .insert(newTimeBlocks)
+        .select();
+
+      if (insertError) throw insertError;
+
+      return true;
     } catch (error) {
-      console.error('Error fetching group members:', error);
+      console.error('Error copying schedule:', error);
+      throw error;
     }
   };
 
-  // Update group members when selectedGroupId changes
-  useEffect(() => {
-    if (selectedGroupId) {
-      fetchGroupMembers(selectedGroupId);
-    } else {
-      setGroupMembers([]);
-      setVisibleUsers(new Set());
+  const handleCopySchedule = async () => {
+    if (!user || !sourceGroupId || !targetGroupId) return;
+
+    if (sourceGroupId === targetGroupId) {
+      toast({
+        title: "Invalid selection",
+        description: "Source and target groups must be different.",
+        variant: "destructive",
+      });
+      return;
     }
-  }, [selectedGroupId]);
+
+    setCopyLoading(true);
+    try {
+      await copyScheduleToGroup(sourceGroupId, targetGroupId, user.id);
+      
+      const sourceGroup = userGroups.find(g => g.id === sourceGroupId);
+      const targetGroup = userGroups.find(g => g.id === targetGroupId);
+      
+      toast({
+        title: "Schedule copied!",
+        description: `Successfully copied your schedule from "${sourceGroup?.name}" to "${targetGroup?.name}".`,
+      });
+
+      setShowCopySchedule(false);
+      setSourceGroupId('');
+      setTargetGroupId('');
+    } catch (error: any) {
+      toast({
+        title: "Error copying schedule",
+        description: error.message || "Failed to copy schedule. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setCopyLoading(false);
+    }
+  };
 
   // Realtime subscription: reflect profile color changes immediately
   useEffect(() => {
@@ -663,6 +752,84 @@ const Index = () => {
                         Group Schedule
                       </h3>
                       <div className="flex items-center gap-3">
+                        {/* Copy Schedule Button */}
+                        {selectedGroupId && userGroups.length > 1 && (
+                          <Dialog open={showCopySchedule} onOpenChange={setShowCopySchedule}>
+                            <DialogTrigger asChild>
+                              <Button variant="outline" size="sm" className="h-8">
+                                <CalendarDays className="h-3 w-3 mr-1" />
+                                Copy Schedule
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-[425px]">
+                              <DialogHeader>
+                                <DialogTitle>Copy Schedule Between Groups</DialogTitle>
+                                <DialogDescription>
+                                  Copy your schedule from one group to another. This will duplicate all your time blocks.
+                                </DialogDescription>
+                              </DialogHeader>
+                              
+                              <div className="space-y-4 py-4">
+                                <div className="space-y-2">
+                                  <Label htmlFor="sourceGroup">Copy From (Source Group)</Label>
+                                  <Select value={sourceGroupId} onValueChange={setSourceGroupId}>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select source group" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {userGroups.map((group) => (
+                                        <SelectItem key={group.id} value={group.id}>
+                                          {group.name}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+
+                                <div className="space-y-2">
+                                  <Label htmlFor="targetGroup">Copy To (Target Group)</Label>
+                                  <Select value={targetGroupId} onValueChange={setTargetGroupId}>
+                                    <SelectTrigger>
+                                      <SelectValue placeholder="Select target group" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {userGroups
+                                        .filter(group => group.id !== sourceGroupId)
+                                        .map((group) => (
+                                          <SelectItem key={group.id} value={group.id}>
+                                            {group.name}
+                                          </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+
+                                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm">
+                                  <div className="font-medium text-yellow-800 mb-1">⚠️ Important Notes:</div>
+                                  <ul className="text-yellow-700 space-y-1 list-disc list-inside">
+                                    <li>This will copy ALL your time blocks from the source group</li>
+                                    <li>The copy will fail if any time conflicts are detected</li>
+                                    <li>Your color preferences will be maintained</li>
+                                  </ul>
+                                </div>
+                              </div>
+
+                              <div className="flex gap-2">
+                                <Button variant="outline" onClick={() => setShowCopySchedule(false)} className="flex-1">
+                                  Cancel
+                                </Button>
+                                <Button 
+                                  onClick={handleCopySchedule}
+                                  disabled={copyLoading || !sourceGroupId || !targetGroupId}
+                                  className="flex-1"
+                                >
+                                  {copyLoading ? 'Copying...' : 'Copy Schedule'}
+                                </Button>
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                        )}
+
                         {/* Time Settings Button */}
                         {selectedGroupId && (
                           <Dialog open={showTimeSettings} onOpenChange={setShowTimeSettings}>
