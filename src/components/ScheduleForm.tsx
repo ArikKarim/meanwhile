@@ -5,181 +5,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Calendar, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import type { TimeBlock } from '@/types';
+import { DAYS_OF_WEEK, SCHEDULE_TAGS } from '@/types';
+import { getUserColorFromId } from '@/utils/colorUtils';
+import { findOverlappingBlocks } from '@/utils/timeUtils';
+import { getTimeBlocks, saveTimeBlocks } from '@/services/scheduleService';
 
 interface ScheduleFormProps {
   groupId: string;
   onScheduleAdded: () => void;
 }
 
-// User color preferences storage
-const USER_COLORS_KEY = 'meanwhile_user_colors';
-
-interface UserColors {
-  [userId: string]: string;
-}
-
-const getUserColors = (): UserColors => {
-  try {
-    const stored = localStorage.getItem(USER_COLORS_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
-};
-
-const saveUserColors = (colors: UserColors) => {
-  localStorage.setItem(USER_COLORS_KEY, JSON.stringify(colors));
-};
-
-// Predefined color palette for auto-assignment (same as other components)
-const DEFAULT_COLORS = [
-  '#3b82f6', // Blue
-  '#ef4444', // Red  
-  '#10b981', // Green
-  '#f59e0b', // Amber
-  '#8b5cf6', // Purple
-  '#ec4899', // Pink
-  '#06b6d4', // Cyan
-  '#84cc16', // Lime
-  '#f97316', // Orange
-  '#6366f1', // Indigo
-];
-
-const getUserColor = (userId: string): string => {
-  const userColors = getUserColors();
-  if (userColors[userId]) {
-    return userColors[userId];
-  }
-  
-  // Auto-assign a color based on user ID hash (same algorithm as other components)
-  const hashCode = userId.split('').reduce((a, b) => {
-    a = ((a << 5) - a) + b.charCodeAt(0);
-    return a & a;
-  }, 0);
-  const colorIndex = Math.abs(hashCode) % DEFAULT_COLORS.length;
-  return DEFAULT_COLORS[colorIndex];
-};
-
-const isColorTaken = (color: string, excludeUserId?: string): boolean => {
-  const userColors = getUserColors();
-  return Object.entries(userColors).some(([userId, userColor]) => 
-    userId !== excludeUserId && userColor.toLowerCase() === color.toLowerCase()
-  );
-};
-
-// Simple localStorage-based time block management
-const TIME_BLOCKS_KEY = 'meanwhile_time_blocks';
-
-interface TimeBlock {
-  id: string;
-  user_id: string;
-  group_id: string;
-  label: string;
-  day_of_week: number;
-  start_time: string;
-  end_time: string;
-  color: string;
-  tag: string;
-  created_at: string;
-}
-
-const getTimeBlocks = async (): Promise<TimeBlock[]> => {
-  try {
-    const { data, error } = await supabase
-      .from('time_blocks')
-      .select('*')
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    return data || [];
-  } catch (error) {
-    console.error('Error fetching time blocks:', error);
-    return [];
-  }
-};
-
-const saveTimeBlocks = async (timeBlocks: Omit<TimeBlock, 'id' | 'created_at'>[]): Promise<TimeBlock[]> => {
-  try {
-    const { data, error } = await supabase
-      .from('time_blocks')
-      .insert(timeBlocks)
-      .select();
-    
-    if (error) throw error;
-    return data || [];
-  } catch (error) {
-    console.error('Error saving time blocks:', error);
-    return [];
-  }
-};
-
-// Overlap detection utilities
-const timeToMinutes = (timeString: string): number => {
-  const [hours, minutes] = timeString.split(':').map(Number);
-  return hours * 60 + minutes;
-};
-
-const minutesToTime = (minutes: number): string => {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
-};
-
-const doTimeBlocksOverlap = (block1: TimeBlock, block2: TimeBlock): boolean => {
-  // Only check if they're on the same day
-  if (block1.day_of_week !== block2.day_of_week) return false;
-  
-  const start1 = timeToMinutes(block1.start_time);
-  const end1 = timeToMinutes(block1.end_time);
-  const start2 = timeToMinutes(block2.start_time);
-  const end2 = timeToMinutes(block2.end_time);
-  
-  // Check if there's any overlap
-  return start1 < end2 && start2 < end1;
-};
-
-const findOverlappingBlocks = (
-  newBlocks: TimeBlock[], 
-  existingBlocks: TimeBlock[], 
-  userId?: string
-): { userOverlaps: TimeBlock[], otherUserOverlaps: TimeBlock[] } => {
-  const userOverlaps: TimeBlock[] = [];
-  const otherUserOverlaps: TimeBlock[] = [];
-  
-  newBlocks.forEach(newBlock => {
-    existingBlocks.forEach(existingBlock => {
-      if (doTimeBlocksOverlap(newBlock, existingBlock)) {
-        if (!userId || existingBlock.user_id === userId) {
-          userOverlaps.push(existingBlock);
-        } else {
-          otherUserOverlaps.push(existingBlock);
-        }
-      }
-    });
-  });
-  
-  return { userOverlaps, otherUserOverlaps };
-};
-
-const DAYS = [
-  { label: 'Sunday', value: 0 },
-  { label: 'Monday', value: 1 },
-  { label: 'Tuesday', value: 2 },
-  { label: 'Wednesday', value: 3 },
-  { label: 'Thursday', value: 4 },
-  { label: 'Friday', value: 5 },
-  { label: 'Saturday', value: 6 },
-];
-
-const TAGS = [
-  { label: 'Class', value: 'class' },
-  { label: 'Work', value: 'work' },
-  { label: 'Personal', value: 'personal' },
-  { label: 'Other', value: 'other' }
-];
+// Removed utility functions - moved to separate modules
 
 const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded }) => {
   const { user } = useAuth();
@@ -200,7 +39,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
 
   useEffect(() => {
     if (user?.id) {
-      setUserColor(getUserColor(user.id));
+      setUserColor(getUserColorFromId(user.id));
     }
   }, [user?.id]);
 
@@ -208,7 +47,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
   useEffect(() => {
     const handleColorChange = () => {
       if (user?.id) {
-        setUserColor(getUserColor(user.id));
+        setUserColor(getUserColorFromId(user.id));
       }
     };
 
@@ -217,33 +56,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
   }, [user?.id]);
 
   const getCurrentColor = () => {
-    return userColor; // Always use UUID-based user color
-  };
-
-  const updateUserColor = (newColor: string) => {
-    if (!user?.id) return;
-    
-    if (isColorTaken(newColor, user.id)) {
-      toast({
-        title: "Color already taken",
-        description: "Another user is already using this color. Please choose a different one.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    const userColors = getUserColors();
-    userColors[user.id] = newColor;
-    saveUserColors(userColors);
-    setUserColor(newColor);
-    
-    // Dispatch custom event to notify other components (same as Index.tsx)
-    window.dispatchEvent(new CustomEvent('userColorChanged'));
-    
-    toast({
-      title: "Color updated",
-      description: "Your color has been successfully updated!"
-    });
+    return userColor;
   };
 
   const handleDayToggle = (dayValue: number) => {
@@ -274,7 +87,8 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
           end_time: formData.end_time,
           color: getCurrentColor(),
           tag: formData.tag,
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         };
 
         newTimeBlocks.push(newTimeBlock);
@@ -366,7 +180,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
           <div className="space-y-2">
             <Label>Days of Week</Label>
             <div className="grid grid-cols-2 gap-2">
-              {DAYS.map((day) => (
+              {DAYS_OF_WEEK.map((day) => (
                 <div key={day.value} className="flex items-center space-x-2">
                   <input
                     type="checkbox"
@@ -416,7 +230,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {TAGS.map((tag) => (
+                  {SCHEDULE_TAGS.map((tag) => (
                     <SelectItem key={tag.value} value={tag.value}>
                       <div className="flex items-center gap-2">
                         <div 
@@ -424,7 +238,7 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
                           style={{ 
                             backgroundColor: formData.tag === tag.value 
                               ? getCurrentColor() 
-                              : '#ccc' // Default for other tags
+                              : '#ccc'
                           }}
                         />
                         {tag.label}
@@ -434,43 +248,11 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
                 </SelectContent>
               </Select>
               <div className="relative">
-                <input
-                  type="color"
-                  value={getCurrentColor()}
-                  onChange={(e) => updateUserColor(e.target.value)}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  title="Custom color override"
-                />
                 <div 
                   className="w-12 h-10 rounded border cursor-pointer flex-shrink-0"
                   style={{ backgroundColor: getCurrentColor() }}
+                  title="Color determined by your user profile"
                 />
-              </div>
-            </div>
-
-          </div>
-
-          <div className="space-y-2">
-            <Label>Your Color</Label>
-            <div className="flex gap-2 items-center">
-              <div 
-                className="w-10 h-10 rounded border-2 border-gray-200 cursor-pointer relative overflow-hidden"
-                title="Click to change your color"
-              >
-                <input
-                  type="color"
-                  value={userColor}
-                  onChange={(e) => updateUserColor(e.target.value)}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                />
-                <div 
-                  className="w-full h-full rounded"
-                  style={{ backgroundColor: userColor }}
-                />
-              </div>
-              <div className="text-sm text-muted-foreground">
-                <p>This color will be used for all your events</p>
-                <p className="text-xs">Each user must have a unique color</p>
               </div>
             </div>
           </div>

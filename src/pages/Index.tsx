@@ -2,342 +2,42 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Navigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { LogOut, Calendar, Users, Settings, Palette, Eye, EyeOff, Clock, CalendarDays } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import { Calendar, Clock, CalendarDays, FileText } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import GroupManager from '@/components/GroupManager';
 import WeeklyCalendar from '@/components/WeeklyCalendar';
+import UserColorPicker from '@/components/UserColorPicker';
+import UserVisibilityFilter from '@/components/UserVisibilityFilter';
+import TimeRangeSettings from '@/components/TimeRangeSettings';
+import CollaborativeNotepad from '@/components/CollaborativeNotepad';
 
-// Calendar settings system
-const CALENDAR_SETTINGS_KEY = 'meanwhile_calendar_settings';
-
-interface UserColors {
-  [userId: string]: string;
-}
-
-interface CalendarSettings {
-  [groupId: string]: {
-    startHour: number;
-    endHour: number;
-    weekStartDay: 'sunday' | 'monday';
-  };
-}
+// Import types and utilities
+import type { UserColors, CalendarSettings, GroupMemberWithProfile } from '@/types';
+import { getUserColorFromId, getUserColorForGroup, getDisplayName } from '@/utils/colorUtils';
+import { getCalendarSettings, saveCalendarSettings, getGroupTimeSettings } from '@/utils/storageUtils';
+import { formatTime } from '@/utils/timeUtils';
+import { debounce } from '@/utils/debounce';
+import { fetchGroupColors, setUserColorForGroup } from '@/services/groupColorService';
+import { copyScheduleToGroup } from '@/services/scheduleService';
 
 
 
-const getCalendarSettings = (): CalendarSettings => {
-  try {
-    const stored = localStorage.getItem(CALENDAR_SETTINGS_KEY);
-    return stored ? JSON.parse(stored) : {};
-  } catch {
-    return {};
-  }
-};
+// Removed helper functions - moved to utilities
 
-const saveCalendarSettings = (settings: CalendarSettings) => {
-  localStorage.setItem(CALENDAR_SETTINGS_KEY, JSON.stringify(settings));
-};
+// Removed - moved to services
 
-const getGroups = () => {
-  try {
-    const stored = localStorage.getItem('meanwhile_groups');
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-};
+// Removed - moved to services
 
-// Simple debounce utility
-const debounce = (func: (...args: any[]) => void, delay: number) => {
-  let timeoutId: NodeJS.Timeout;
-  return (...args: any[]) => {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => func(...args), delay);
-  };
-};
-
-// Predefined color palette for auto-assignment
-const DEFAULT_COLORS = [
-  '#3b82f6', // Blue
-  '#ef4444', // Red  
-  '#10b981', // Green
-  '#f59e0b', // Amber
-  '#8b5cf6', // Purple
-  '#ec4899', // Pink
-  '#06b6d4', // Cyan
-  '#84cc16', // Lime
-  '#f97316', // Orange
-  '#6366f1', // Indigo
-];
-
-// Helper function for color assignment
-const getUserColor = (userId: string): string => {
-  // Auto-assign a color based on user ID hash
-  const hashCode = userId.split('').reduce((a, b) => {
-    a = ((a << 5) - a) + b.charCodeAt(0);
-    return a & a;
-  }, 0);
-  const colorIndex = Math.abs(hashCode) % DEFAULT_COLORS.length;
-  return DEFAULT_COLORS[colorIndex];
-};
-
-// Database-synced group-specific colors (read-only version)
-const getUserColorForGroup = async (userId: string, groupId: string): Promise<string> => {
-  try {
-    const { data, error } = await supabase
-      .from('user_group_colors')
-      .select('color')
-      .eq('user_id', userId)
-      .eq('group_id', groupId)
-      .single();
-    
-    if (error || !data) {
-      // Return consistent hash-based color instead of creating database entry
-      return getUserColor(userId);
-    }
-    
-    return data.color;
-  } catch (error) {
-    console.error('Error fetching user color for group:', error);
-    return getUserColor(userId);
-  }
-};
-
-// Function to ensure user has a color assigned in database (used when user changes color)
-const ensureUserColorInDatabase = async (userId: string, groupId: string): Promise<string> => {
-  try {
-    // Check if user already has a color in database
-    const { data: existingColor, error: fetchError } = await supabase
-      .from('user_group_colors')
-      .select('color')
-      .eq('user_id', userId)
-      .eq('group_id', groupId)
-      .single();
-    
-    if (!fetchError && existingColor) {
-      return existingColor.color;
-    }
-    
-    // Try to use database function to assign color if not found
-    try {
-      const { data: assignedColor, error: assignError } = await supabase
-        .rpc('assign_user_color_in_group', {
-          p_user_id: userId,
-          p_group_id: groupId
-        });
-      
-      if (!assignError && assignedColor) {
-        return assignedColor;
-      }
-      
-      console.warn('Database function failed, using fallback color assignment:', assignError);
-    } catch (rpcError) {
-      console.warn('RPC function not available, using fallback color assignment:', rpcError);
-    }
-    
-    // Fallback: create a basic database entry with hash-based color
-    const fallbackColor = getUserColor(userId);
-    const success = await setUserColorForGroup(userId, groupId, fallbackColor);
-    
-    if (success) {
-      return fallbackColor;
-    }
-    
-    return fallbackColor;
-  } catch (error) {
-    console.error('Error ensuring user color in database:', error);
-    return getUserColor(userId);
-  }
-};
-
-// Synchronous version that uses loaded state
-const getUserColorForGroupSync = (userId: string, groupColors: {[userId: string]: string}): string => {
-  if (groupColors[userId]) {
-    return groupColors[userId];
-  }
-  return getUserColor(userId); // fallback
-};
-
-const setUserColorForGroup = async (userId: string, groupId: string, color: string): Promise<{ success: boolean; error?: string }> => {
-  try {
-    const normalized = (color || '').toLowerCase();
-    console.log('Calling set_user_color RPC with:', { p_user_id: userId, p_group_id: groupId, p_color: normalized });
-    
-    const { data, error } = await supabase.rpc('set_user_color', {
-      p_user_id: userId,
-      p_group_id: groupId,
-      p_color: normalized,
-    });
-    
-    if (error) {
-      console.error('RPC error:', error);
-      
-      // Handle specific error cases
-      if (error.message?.includes('color_taken')) {
-        return { success: false, error: 'color_taken' };
-      }
-      if (error.message?.includes('not_group_member')) {
-        return { success: false, error: 'not_group_member' };
-      }
-      
-      return { success: false, error: error.message || 'Unknown error' };
-    }
-    
-    console.log('RPC success, returned color:', data);
-    return { success: true };
-  } catch (error) {
-    console.error('Error setting user color via RPC:', error);
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
-  }
-};
-
-const isColorTakenInGroup = async (color: string, groupId: string, excludeUserId?: string): Promise<boolean> => {
-  try {
-    const normalizedColor = (color || '').toLowerCase();
-    const { data, error } = await supabase
-      .from('user_group_colors')
-      .select('user_id')
-      .eq('group_id', groupId)
-      .filter('color', 'ilike', normalizedColor)
-      .neq('user_id', excludeUserId || '');
-    if (error) throw error;
-    return (data && data.length > 0) || false;
-  } catch (error) {
-    console.error('Error checking if color is taken:', error);
-    return false;
-  }
-};
-
-// Fetch all group colors from database
-const fetchGroupColors = async (groupId: string): Promise<{[userId: string]: string}> => {
-  try {
-    const { data, error } = await supabase
-      .from('user_group_colors')
-      .select('user_id, color, user_name')
-      .eq('group_id', groupId);
-    
-    if (error) throw error;
-    
-    const colorMap: {[userId: string]: string} = {};
-    data?.forEach(record => {
-      colorMap[record.user_id] = record.color;
-      // Note: user_name is now available in record.user_name if needed for future features
-    });
-    
-    return colorMap;
-  } catch (error) {
-    console.error('Error fetching group colors:', error);
-    return {};
-  }
-};
+// Removed color management functions - moved to services
 
 
 
-// Time Range Form Component
-const TimeRangeForm = ({ groupId, currentSettings, onUpdate, readOnly = false }: {
-  groupId: string;
-  currentSettings: { startHour: number; endHour: number; weekStartDay: 'sunday' | 'monday' };
-  onUpdate?: (groupId: string, startHour: number, endHour: number, weekStartDay: 'sunday' | 'monday') => void;
-  readOnly?: boolean;
-}) => {
-  const [startHour, setStartHour] = useState(currentSettings.startHour);
-  const [endHour, setEndHour] = useState(currentSettings.endHour);
-  const [weekStartDay, setWeekStartDay] = useState(currentSettings.weekStartDay);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (startHour >= endHour) {
-      alert('Start time must be before end time');
-      return;
-    }
-    if (endHour - startHour < 3) {
-      alert('Calendar must span at least 3 hours');
-      return;
-    }
-    if (!readOnly && onUpdate) {
-      onUpdate(groupId, startHour, endHour, weekStartDay);
-    }
-  };
-
-  const formatTime = (hour: number) => {
-    if (hour === 0) return '12 AM';
-    if (hour < 12) return `${hour} AM`;
-    if (hour === 12) return '12 PM';
-    return `${hour - 12} PM`;
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="start-hour">Start Time</Label>
-          <select
-            id="start-hour"
-            value={startHour}
-            onChange={(e) => setStartHour(Number(e.target.value))}
-            disabled={readOnly}
-            className="w-full p-2 border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {Array.from({ length: 24 }, (_, i) => (
-              <option key={i} value={i}>
-                {formatTime(i)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="end-hour">End Time</Label>
-          <select
-            id="end-hour"
-            value={endHour}
-            onChange={(e) => setEndHour(Number(e.target.value))}
-            disabled={readOnly}
-            className="w-full p-2 border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {Array.from({ length: 24 }, (_, i) => (
-              <option key={i} value={i}>
-                {formatTime(i)}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-      
-      <div className="space-y-2">
-        <Label htmlFor="week-start-day">Week Starts On</Label>
-        <select
-          id="week-start-day"
-          value={weekStartDay}
-          onChange={(e) => setWeekStartDay(e.target.value as 'sunday' | 'monday')}
-          disabled={readOnly}
-          className="w-full p-2 border border-gray-300 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <option value="sunday">Sunday</option>
-          <option value="monday">Monday</option>
-        </select>
-      </div>
-      
-      <div className="text-sm text-muted-foreground">
-        Current: {formatTime(currentSettings.startHour)} - {formatTime(currentSettings.endHour)}, Week starts on {currentSettings.weekStartDay === 'sunday' ? 'Sunday' : 'Monday'}
-      </div>
-      {!readOnly && (
-        <div className="flex gap-2 pt-4">
-          <Button type="submit">Update Time Range</Button>
-          <Button type="button" variant="outline" onClick={() => {}}>
-            Cancel
-          </Button>
-        </div>
-      )}
-    </form>
-  );
-};
+// Removed TimeRangeForm - moved to separate component
 
 const Index = () => {
   const { user, signOut, loading } = useAuth();
@@ -346,7 +46,7 @@ const Index = () => {
   const [viewMode, setViewMode] = useState<'busy' | 'free'>('busy');
   // Removed refreshKey - calendar updates automatically without forced refreshes
   const [visibleUsers, setVisibleUsers] = useState<Set<string>>(new Set());
-  const [groupMembers, setGroupMembers] = useState<Array<{id: string, username: string, firstName?: string, lastName?: string}>>([]);
+  const [groupMembers, setGroupMembers] = useState<GroupMemberWithProfile[]>([]);
   const [userColor, setUserColor] = useState('#3b82f6');
   const [userColors, setUserColors] = useState<UserColors>({});
   const [calendarSettings, setCalendarSettings] = useState<CalendarSettings>({});
@@ -356,21 +56,19 @@ const Index = () => {
   const [targetGroupId, setTargetGroupId] = useState<string>('');
   const [copyLoading, setCopyLoading] = useState(false);
   const [userGroups, setUserGroups] = useState<Array<{id: string, name: string}>>([]);
-  const [groupMembersList, setGroupMembersList] = useState<Array<{id: string, username: string, firstName?: string, lastName?: string}>>([]);
-  const [groupColors, setGroupColors] = useState<{[userId: string]: string}>({});
+  const [groupMembersList, setGroupMembersList] = useState<GroupMemberWithProfile[]>([]);
+  const [groupColors, setGroupColors] = useState<UserColors>({});
   const [isAdmin, setIsAdmin] = useState(false);
-  // Realtime color updates
-  const [colorChannelActive, setColorChannelActive] = useState(false);
+  const [showNotepad, setShowNotepad] = useState(false);
 
   // Initialize user color
   useEffect(() => {
     const loadColors = async () => {
       if (user?.id) {
         // Set default user color for fallback
-        setUserColor(getUserColor(user.id));
-        setUserColors(prev => ({ ...prev, [user.id!]: getUserColor(user.id) }));
+        setUserColor(getUserColorFromId(user.id));
+        setUserColors(prev => ({ ...prev, [user.id!]: getUserColorFromId(user.id) }));
       }
-      // Do not override member map with local storage; only use local for unknown users
     };
     loadColors();
   }, [user?.id]);
@@ -379,9 +77,8 @@ const Index = () => {
   useEffect(() => {
     const handleColorChange = () => {
       if (user?.id) {
-        const updated = getUserColor(user.id);
+        const updated = getUserColorFromId(user.id);
         setUserColor(updated);
-        // Only update the current user's color in the map to avoid wiping others
         setUserColors(prev => ({ ...prev, [user.id]: updated }));
       }
     };
@@ -465,7 +162,7 @@ const Index = () => {
           let memberColor = groupColorsFromDB[member.id];
           if (!memberColor) {
             // Use consistent hash-based color instead of random assignment
-            memberColor = getUserColor(member.id);
+            memberColor = getUserColorFromId(member.id);
           }
           updatedColors[member.id] = memberColor;
           finalGroupColors[member.id] = memberColor;
@@ -555,9 +252,9 @@ const Index = () => {
     }
   };
 
-  // Get calendar time settings for current group
-  const getGroupTimeSettings = (groupId: string) => {
-    return calendarSettings[groupId] || { startHour: 7, endHour: 21, weekStartDay: 'sunday' as const };
+  // Get calendar time settings for current group - using utility function
+  const getCurrentGroupTimeSettings = (groupId: string) => {
+    return getGroupTimeSettings(groupId, calendarSettings);
   };
 
   // Update calendar time settings
@@ -569,10 +266,9 @@ const Index = () => {
     setCalendarSettings(newSettings);
     saveCalendarSettings(newSettings);
     setShowTimeSettings(false);
-    // Calendar will automatically re-render due to props change - no need to force refresh
     toast({
       title: "Calendar Updated",
-      description: `Calendar time range set to ${startHour < 12 ? startHour : startHour === 12 ? 12 : startHour - 12}${startHour < 12 ? 'AM' : 'PM'} - ${endHour < 12 ? endHour : endHour === 12 ? 12 : endHour - 12}${endHour < 12 ? 'AM' : 'PM'}, Week starts on ${weekStartDay === 'sunday' ? 'Sunday' : 'Monday'}`,
+      description: `Calendar time range set to ${formatTime(startHour)} - ${formatTime(endHour)}, Week starts on ${weekStartDay === 'sunday' ? 'Sunday' : 'Monday'}`,
     });
   };
 
@@ -669,90 +365,7 @@ const Index = () => {
     debouncedUpdateUserColor(normalizedColor);
   };
 
-  // Helper function to convert time to minutes for overlap detection
-  const timeToMinutes = (timeString: string): number => {
-    const [hours, minutes] = timeString.split(':').map(Number);
-    return hours * 60 + minutes;
-  };
-
-  // Copy schedule functionality
-  const copyScheduleToGroup = async (sourceGroupId: string, targetGroupId: string, userId: string): Promise<boolean> => {
-    try {
-      // Get all time blocks for the user in the source group
-      const { data: sourceTimeBlocks, error: fetchError } = await supabase
-        .from('time_blocks')
-        .select('*')
-        .eq('group_id', sourceGroupId)
-        .eq('user_id', userId);
-
-      if (fetchError) throw fetchError;
-
-      if (!sourceTimeBlocks || sourceTimeBlocks.length === 0) {
-        throw new Error('No schedules found in the source group to copy.');
-      }
-
-      // Check for existing schedules in target group that might overlap
-      const { data: targetTimeBlocks, error: targetFetchError } = await supabase
-        .from('time_blocks')
-        .select('*')
-        .eq('group_id', targetGroupId)
-        .eq('user_id', userId);
-
-      if (targetFetchError) throw targetFetchError;
-
-      // Prepare new time blocks for insertion (remove id and created_at, update group_id)
-      const newTimeBlocks = sourceTimeBlocks.map(block => ({
-        user_id: block.user_id,
-        group_id: targetGroupId,
-        label: block.label,
-        day_of_week: block.day_of_week,
-        start_time: block.start_time,
-        end_time: block.end_time,
-        color: block.color,
-        tag: block.tag
-      }));
-
-      // Check for overlaps with existing blocks in target group
-      const overlaps: any[] = [];
-      if (targetTimeBlocks && targetTimeBlocks.length > 0) {
-        newTimeBlocks.forEach(newBlock => {
-          targetTimeBlocks.forEach(existingBlock => {
-            if (newBlock.day_of_week === existingBlock.day_of_week) {
-              const newStart = timeToMinutes(newBlock.start_time);
-              const newEnd = timeToMinutes(newBlock.end_time);
-              const existingStart = timeToMinutes(existingBlock.start_time);
-              const existingEnd = timeToMinutes(existingBlock.end_time);
-              
-              // Check for overlap
-              if (newStart < existingEnd && existingStart < newEnd) {
-                overlaps.push({
-                  new: newBlock,
-                  existing: existingBlock
-                });
-              }
-            }
-          });
-        });
-      }
-
-      if (overlaps.length > 0) {
-        throw new Error(`Cannot copy schedules: ${overlaps.length} time conflict(s) detected with your existing schedule in the target group.`);
-      }
-
-      // Insert the new time blocks
-      const { data: insertedBlocks, error: insertError } = await supabase
-        .from('time_blocks')
-        .insert(newTimeBlocks)
-        .select();
-
-      if (insertError) throw insertError;
-
-      return true;
-    } catch (error) {
-      console.error('Error copying schedule:', error);
-      throw error;
-    }
-  };
+  // Copy schedule functionality - moved to service
 
   const handleCopySchedule = async () => {
     if (!user || !sourceGroupId || !targetGroupId) return;
@@ -832,13 +445,6 @@ const Index = () => {
     }
   };
 
-  const getDisplayName = (member: any) => {
-    if (member.firstName && member.lastName) {
-      return `${member.firstName} ${member.lastName.charAt(0)}`;
-    }
-    return member.username;
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -898,115 +504,47 @@ const Index = () => {
             />
             
             {/* User Filter for Who's Busy mode */}
-            {selectedGroupId && viewMode === 'busy' && groupMembers.length > 0 && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Eye className="h-4 w-4" />
-                      Users
-                    </CardTitle>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={toggleShowMine}
-                      className="text-xs"
-                    >
-                      <Eye className="h-3 w-3 mr-1" />
-                      {visibleUsers.size === 1 && user?.id && visibleUsers.has(user.id) 
-                        ? 'Show All' 
-                        : 'Show Mine'
-                      }
-                    </Button>
-                  </div>
-                  <CardDescription>
-                    Uncheck users to hide their schedules
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-1 gap-3">
-                    {groupMembers.map((member) => (
-                      <div key={member.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`user-${member.id}`}
-                          checked={visibleUsers.has(member.id)}
-                          onCheckedChange={() => toggleUserVisibility(member.id)}
-                        />
-                        <Label
-                          htmlFor={`user-${member.id}`}
-                          className="text-sm font-medium cursor-pointer flex items-center gap-2"
-                        >
-                          <div 
-                            className="w-3 h-3 rounded-full" 
-                            style={{ 
-                              backgroundColor: getUserColorForGroupSync(member.id, groupColors),
-                              opacity: visibleUsers.has(member.id) ? 1 : 0.3
-                            }}
-                          />
-                          <span className={visibleUsers.has(member.id) ? '' : 'text-muted-foreground'}>
-                            {getDisplayName(member)}
-                            {member.id === user?.id && ' (You)'}
-                          </span>
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-3 pt-3 border-t text-xs text-muted-foreground">
-                    Showing {visibleUsers.size} of {groupMembers.length} users
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+            <UserVisibilityFilter
+              selectedGroupId={selectedGroupId}
+              viewMode={viewMode}
+              groupMembers={groupMembers}
+              visibleUsers={visibleUsers}
+              groupColors={groupColors}
+              currentUserId={user?.id}
+              onToggleUserVisibility={toggleUserVisibility}
+              onToggleShowMine={toggleShowMine}
+            />
             
             {/* User Color Settings */}
             {user && (
-              <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Palette className="h-4 w-4" />
-                      Your Color
-                    </CardTitle>
-                  <CardDescription>
-                    Choose a unique color for your events in this group
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex gap-3 items-center">
-                    <div 
-                      className="w-12 h-12 rounded-lg border-2 border-gray-200 cursor-pointer relative overflow-hidden shadow-sm"
-                      title="Click to change your color"
-                    >
-                      <input
-                        type="color"
-                        value={selectedGroupId && user?.id ? getUserColorForGroupSync(user.id, groupColors) : userColor}
-                        onChange={(e) => updateUserColorImmediate(e.target.value)}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                      />
-                      <div 
-                        className="w-full h-full rounded-lg"
-                        style={{ backgroundColor: selectedGroupId && user?.id ? getUserColorForGroupSync(user.id, groupColors) : userColor }}
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-900">
-                        {(selectedGroupId && user?.id ? getUserColorForGroupSync(user.id, groupColors) : userColor).toUpperCase()}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Each user must have a unique color in this group
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+              <UserColorPicker
+                user={user}
+                selectedGroupId={selectedGroupId}
+                groupColors={groupColors}
+                userColor={userColor}
+                onColorChange={updateUserColorImmediate}
+              />
             )}
           </div>
 
           {/* Main Content */}
           <div className="lg:col-span-3">
             {selectedGroupId ? (
-              <div className="space-y-6">
-                {/* Calendar */}
-                <div className="bg-white rounded-lg border shadow-sm">
+              <Tabs defaultValue="calendar" className="space-y-6">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="calendar" className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4" />
+                    Schedule
+                  </TabsTrigger>
+                  <TabsTrigger value="notepad" className="flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    Notepad
+                  </TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="calendar">
+                  {/* Calendar */}
+                  <div className="bg-white rounded-lg border shadow-sm">
                   <div className="p-4 border-b">
                     <div className="flex items-center justify-between">
                       <h3 className="text-base font-semibold flex items-center gap-2 font-heading">
@@ -1111,9 +649,9 @@ const Index = () => {
                                   }
                                 </DialogDescription>
                               </DialogHeader>
-                              <TimeRangeForm 
+                              <TimeRangeSettings 
                                 groupId={selectedGroupId}
-                                currentSettings={getGroupTimeSettings(selectedGroupId)}
+                                currentSettings={getCurrentGroupTimeSettings(selectedGroupId)}
                                 onUpdate={isAdmin ? updateTimeSettings : undefined}
                                 readOnly={!isAdmin}
                               />
@@ -1137,15 +675,21 @@ const Index = () => {
                       groupId={selectedGroupId} 
                       viewMode={viewMode}
                       visibleUsers={viewMode === 'busy' ? visibleUsers : undefined}
-                      startHour={getGroupTimeSettings(selectedGroupId).startHour}
-                      endHour={getGroupTimeSettings(selectedGroupId).endHour}
-                      weekStartDay={getGroupTimeSettings(selectedGroupId).weekStartDay}
+                      startHour={getCurrentGroupTimeSettings(selectedGroupId).startHour}
+                      endHour={getCurrentGroupTimeSettings(selectedGroupId).endHour}
+                      weekStartDay={getCurrentGroupTimeSettings(selectedGroupId).weekStartDay}
                       userColors={userColors}
                       groupColors={groupColors}
                     />
                   </div>
                 </div>
-              </div>
+                </TabsContent>
+                
+                <TabsContent value="notepad">
+                  {/* Notepad */}
+                  <CollaborativeNotepad groupId={selectedGroupId} />
+                </TabsContent>
+              </Tabs>
             ) : (
               <div className="text-center py-12">
                 <Calendar className="h-16 w-16 text-muted-foreground mx-auto mb-4" />

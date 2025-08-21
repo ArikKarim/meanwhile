@@ -191,6 +191,164 @@ export type Database = {
           },
         ]
       }
+      notepads: {
+        Row: {
+          id: string
+          group_id: string
+          title: string
+          content: string
+          last_updated_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          group_id: string
+          title?: string
+          content?: string
+          last_updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          group_id?: string
+          title?: string
+          content?: string
+          last_updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notepads_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: true
+            referencedRelation: "groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notepad_operations: {
+        Row: {
+          id: string
+          notepad_id: string
+          user_id: string
+          operation_type: string
+          position: number
+          content: string | null
+          length: number | null
+          timestamp: string
+          sequence_number: number
+        }
+        Insert: {
+          id?: string
+          notepad_id: string
+          user_id: string
+          operation_type: string
+          position: number
+          content?: string | null
+          length?: number | null
+          timestamp?: string
+          sequence_number?: number
+        }
+        Update: {
+          id?: string
+          notepad_id?: string
+          user_id?: string
+          operation_type?: string
+          position?: number
+          content?: string | null
+          length?: number | null
+          timestamp?: string
+          sequence_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notepad_operations_notepad_id_fkey"
+            columns: ["notepad_id"]
+            isOneToOne: false
+            referencedRelation: "notepads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notepad_cursors: {
+        Row: {
+          id: string
+          notepad_id: string
+          user_id: string
+          position: number
+          selection_start: number | null
+          selection_end: number | null
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          notepad_id: string
+          user_id: string
+          position?: number
+          selection_start?: number | null
+          selection_end?: number | null
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          notepad_id?: string
+          user_id?: string
+          position?: number
+          selection_start?: number | null
+          selection_end?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notepad_cursors_notepad_id_fkey"
+            columns: ["notepad_id"]
+            isOneToOne: false
+            referencedRelation: "notepads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notepad_collaborators: {
+        Row: {
+          id: string
+          notepad_id: string
+          user_id: string
+          user_name: string
+          user_color: string
+          is_active: boolean
+          last_seen: string
+        }
+        Insert: {
+          id?: string
+          notepad_id: string
+          user_id: string
+          user_name: string
+          user_color?: string
+          is_active?: boolean
+          last_seen?: string
+        }
+        Update: {
+          id?: string
+          notepad_id?: string
+          user_id?: string
+          user_name?: string
+          user_color?: string
+          is_active?: boolean
+          last_seen?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notepad_collaborators_notepad_id_fkey"
+            columns: ["notepad_id"]
+            isOneToOne: false
+            referencedRelation: "notepads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -216,11 +374,79 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: string
       }
+      generate_user_uuid: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
       get_user_most_recent_color: {
         Args: {
           p_user_id: string
         }
         Returns: string
+      }
+      set_session_user: {
+        Args: {
+          user_id: string
+        }
+        Returns: undefined
+      }
+      clear_session_user: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
+      get_current_user_id: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
+      is_group_member: {
+        Args: {
+          group_id: string
+          user_id: string
+        }
+        Returns: boolean
+      }
+      create_group_notepad: {
+        Args: {
+          p_group_id: string
+        }
+        Returns: string
+      }
+      join_notepad_collaboration: {
+        Args: {
+          p_notepad_id: string
+          p_user_name: string
+          p_user_color: string
+        }
+        Returns: undefined
+      }
+      leave_notepad_collaboration: {
+        Args: {
+          p_notepad_id: string
+        }
+        Returns: undefined
+      }
+      update_notepad_cursor: {
+        Args: {
+          p_notepad_id: string
+          p_position: number
+          p_selection_start?: number
+          p_selection_end?: number
+        }
+        Returns: undefined
+      }
+      apply_notepad_operation: {
+        Args: {
+          p_notepad_id: string
+          p_operation_type: string
+          p_position: number
+          p_content?: string
+          p_length?: number
+        }
+        Returns: number
+      }
+      cleanup_inactive_collaborators: {
+        Args: Record<PropertyKey, never>
+        Returns: number
       }
     }
     Enums: {

@@ -94,11 +94,25 @@ const getCurrentUser = (): User | null => {
   }
 };
 
-const setCurrentUser = (user: User | null) => {
+const setCurrentUser = async (user: User | null) => {
   if (user) {
     localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+    
+    // Set user context for RLS - we'll use a custom session variable
+    try {
+      await supabase.rpc('set_session_user', { user_id: user.id });
+    } catch (error) {
+      console.warn('Could not set session user:', error);
+    }
   } else {
     localStorage.removeItem(CURRENT_USER_KEY);
+    
+    // Clear user context
+    try {
+      await supabase.rpc('clear_session_user');
+    } catch (error) {
+      console.warn('Could not clear session user:', error);
+    }
   }
 };
 
@@ -158,10 +172,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // Check if current user has old string-based ID (needs re-auth)
       if (currentUser && !isValidUUID(currentUser.id)) {
         console.log('🔄 User has old string-based ID, clearing session for re-auth');
-        setCurrentUser(null);
+        await setCurrentUser(null);
         setUser(null);
       } else {
         setUser(currentUser);
+        // Set user context for existing session
+        if (currentUser) {
+          try {
+            await supabase.rpc('set_session_user', { user_id: currentUser.id });
+          } catch (error) {
+            console.warn('Could not set session user on init:', error);
+          }
+        }
       }
       
       // Run migration on first load
@@ -228,7 +250,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         lastName: savedUser.last_name
       };
       
-      setCurrentUser(userSession);
+      await setCurrentUser(userSession);
       setUser(userSession);
 
       return { error: null };
@@ -271,7 +293,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         lastName: foundUser.last_name || ''
       };
       
-      setCurrentUser(userSession);
+      await setCurrentUser(userSession);
       setUser(userSession);
 
       return { error: null };
@@ -282,7 +304,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => {
-    setCurrentUser(null);
+    await setCurrentUser(null);
     setUser(null);
   };
 

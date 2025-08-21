@@ -6,19 +6,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useAuth } from '@/hooks/useAuth';
 import { useToast } from '@/hooks/use-toast';
-import { Users, Copy, Trash2, CalendarDays } from 'lucide-react';
+import { Users, Copy, Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-
-interface Group {
-  id: string;
-  name: string;
-  code: string;
-  created_by: string;
-}
+import type { Group, GroupMember, TimeBlock } from '@/types';
 
 interface GroupManagerProps {
   onGroupSelect: (groupId: string) => void;
@@ -31,26 +23,6 @@ interface StoredGroup {
   name: string;
   code: string;
   created_by: string;
-  created_at: string;
-}
-
-interface GroupMember {
-  id: string;
-  group_id: string;
-  user_id: string;
-  joined_at: string;
-}
-
-interface TimeBlock {
-  id: string;
-  user_id: string;
-  group_id: string;
-  label: string;
-  day_of_week: number;
-  start_time: string;
-  end_time: string;
-  color: string;
-  tag: string;
   created_at: string;
 }
 
@@ -187,7 +159,7 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
       
       const userGroups = allGroups.filter(group => userMemberGroups.includes(group.id));
       
-      setGroups(userGroups);
+      setGroups(userGroups as Group[]);
       
       // Auto-select first group if none selected and current selection is invalid
       if (userGroups.length > 0 && (!selectedGroupId || !userGroups.find(g => g.id === selectedGroupId))) {
@@ -375,56 +347,6 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
     });
   };
 
-  const handleCopySchedule = async () => {
-    if (!user || !sourceGroupId || !targetGroupId) return;
-
-    if (sourceGroupId === targetGroupId) {
-      toast({
-        title: "Invalid selection",
-        description: "Source and target groups must be different.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setCopyLoading(true);
-    try {
-      await copyScheduleToGroup(sourceGroupId, targetGroupId, user.id);
-      
-      const sourceGroup = groups.find(g => g.id === sourceGroupId);
-      const targetGroup = groups.find(g => g.id === targetGroupId);
-      
-      toast({
-        title: "Schedule copied!",
-        description: `Successfully copied your schedule from "${sourceGroup?.name}" to "${targetGroup?.name}".`,
-      });
-
-      setShowCopyDialog(false);
-      setSourceGroupId('');
-      setTargetGroupId('');
-    } catch (error: any) {
-      toast({
-        title: "Error copying schedule",
-        description: error.message || "Failed to copy schedule. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setCopyLoading(false);
-    }
-  };
-
-  const openCopyDialog = () => {
-    if (groups.length < 2) {
-      toast({
-        title: "Not enough groups",
-        description: "You need to be in at least 2 groups to copy schedules between them.",
-        variant: "destructive",
-      });
-      return;
-    }
-    setShowCopyDialog(true);
-  };
-
   if (loading) {
     return (
       <Card>
@@ -575,8 +497,6 @@ const GroupManager = ({ onGroupSelect, selectedGroupId }: GroupManagerProps) => 
               </Button>
             </form>
           </TabsContent>
-
-
         </Tabs>
       </CardContent>
     </Card>

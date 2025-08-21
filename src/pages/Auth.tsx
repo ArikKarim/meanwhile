@@ -194,7 +194,7 @@ const Auth = () => {
             </Tabs>
             
             <div className="mt-6 text-center text-sm text-muted-foreground">
-              <Link to="/" className="text-blue-600 hover:text-blue-800 underline">
+              <Link to="/" className="text-gray-600 hover:text-gray-800">
                 ← Back to home page
               </Link>
             </div>
