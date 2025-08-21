@@ -1074,8 +1074,8 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                     timeSlot.minute === 30 ? 'border-t-slate-200' : 
                     'border-t-slate-100 border-dashed'
                   }`}
-                  onClick={(e) => handleTimeSlotClick(dayIndex, timeSlot, e)}
-                  title={`Click to create event at ${timeSlot.time}`}
+                  onDoubleClick={(e) => handleTimeSlotClick(dayIndex, timeSlot, e)}
+                  title={`Double-click to create event at ${timeSlot.time}`}
                 >
                   <div className="w-full h-full opacity-0 group-hover:opacity-100 transition-opacity bg-blue-100/30 rounded-sm m-0.5" />
                 </div>

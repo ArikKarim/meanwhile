@@ -5,6 +5,19 @@ import type { TimeBlock } from '@/types';
 import { timeToMinutes } from '@/utils/timeUtils';
 
 /**
+ * Ensure user session is set for RLS
+ */
+const ensureUserSession = async (userId: string): Promise<void> => {
+  try {
+    await supabase.rpc('set_session_user', { user_id: userId });
+    console.log('🔒 Session user set for schedule operation:', userId);
+  } catch (error) {
+    console.error('❌ Failed to set session user:', error);
+    throw new Error('Authentication failed. Please refresh the page and try again.');
+  }
+};
+
+/**
  * Fetch all time blocks
  */
 export const getTimeBlocks = async (): Promise<TimeBlock[]> => {
@@ -29,16 +42,28 @@ export const saveTimeBlocks = async (
   timeBlocks: Omit<TimeBlock, 'id' | 'created_at'>[]
 ): Promise<TimeBlock[]> => {
   try {
+    console.log('💾 Attempting to save time blocks:', { count: timeBlocks.length, timeBlocks });
+    
+    // Ensure user session is set for RLS before saving
+    if (timeBlocks.length > 0) {
+      await ensureUserSession(timeBlocks[0].user_id);
+    }
+    
     const { data, error } = await supabase
       .from('time_blocks')
       .insert(timeBlocks)
       .select();
     
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Database error saving time blocks:', error);
+      throw error;
+    }
+    
+    console.log('✅ Time blocks saved successfully:', { count: data?.length, data });
     return data || [];
   } catch (error) {
-    console.error('Error saving time blocks:', error);
-    return [];
+    console.error('❌ Error saving time blocks:', error);
+    throw error; // Re-throw to let caller handle the error properly
   }
 };
 

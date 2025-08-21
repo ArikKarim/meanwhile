@@ -102,8 +102,9 @@ const setCurrentUser = async (user: User | null) => {
     // Set user context for RLS - we'll use a custom session variable
     try {
       await supabase.rpc('set_session_user', { user_id: user.id });
+      console.log('✅ Session user set for RLS:', user.id);
     } catch (error) {
-      console.warn('Could not set session user:', error);
+      console.error('❌ Could not set session user for RLS:', error);
     }
   } else {
     localStorage.removeItem(CURRENT_USER_KEY);
@@ -184,8 +185,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (currentUser) {
           try {
             await supabase.rpc('set_session_user', { user_id: currentUser.id });
+            console.log('✅ Session user restored for RLS:', currentUser.id);
           } catch (error) {
-            console.warn('Could not set session user on init:', error);
+            console.error('❌ Could not set session user on init:', error);
           }
         }
       }

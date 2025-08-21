@@ -115,12 +115,24 @@ const ScheduleForm: React.FC<ScheduleFormProps> = ({ groupId, onScheduleAdded })
         });
       }
 
-      const savedBlocks = await saveTimeBlocks(newTimeBlocks);
+      let savedBlocks;
+      try {
+        savedBlocks = await saveTimeBlocks(newTimeBlocks);
+      } catch (saveError: any) {
+        console.error('Failed to save time blocks:', saveError);
+        toast({
+          title: "Error saving schedule",
+          description: saveError?.message || "Failed to save your schedule. Please try refreshing the page and logging in again.",
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
       
       if (savedBlocks.length === 0) {
         toast({
           title: "Error saving schedule",
-          description: "Failed to save your schedule. Please try again.",
+          description: "No time blocks were saved. Please try again.",
           variant: "destructive",
         });
         setLoading(false);
