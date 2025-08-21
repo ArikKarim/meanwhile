@@ -1,5 +1,6 @@
 import { useState, useEffect, useContext, createContext } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import bcrypt from 'bcryptjs';
 
 interface User {
   id: string;
@@ -31,14 +32,14 @@ interface StoredUser {
   created_at: string;
 }
 
-// Simple password hashing (in production, use proper bcrypt or similar)
-const hashPassword = (password: string): string => {
-  // This is a simple hash for demo purposes - use proper hashing in production
-  return btoa(password + 'meanwhile_salt');
+// bcrypt password hashing
+const hashPassword = async (password: string): Promise<string> => {
+  const saltRounds = 12;
+  return await bcrypt.hash(password, saltRounds);
 };
 
-const verifyPassword = (password: string, hash: string): boolean => {
-  return hashPassword(password) === hash;
+const verifyPassword = async (password: string, hash: string): Promise<boolean> => {
+  return await bcrypt.compare(password, hash);
 };
 
 // Helper function to validate UUID format
@@ -141,11 +142,14 @@ const migrateLocalStorageUsers = async (): Promise<void> => {
           continue;
         }
         
+        // Hash password for migration
+        const hashedPassword = await hashPassword(user.password);
+        
         // Migrate user to database with proper UUID
         await saveStoredUser({
           user_id: uuidData,
           username: user.username,
-          password_hash: hashPassword(user.password),
+          password_hash: hashedPassword,
           first_name: user.firstName,
           last_name: user.lastName
         });
@@ -227,10 +231,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const userId = uuidData;
       console.log('📝 Creating new user:', { userId, username: username.toLowerCase() });
       
+      // Hash the password
+      const hashedPassword = await hashPassword(password);
+      
       const savedUser = await saveStoredUser({
         user_id: userId,
         username: username.trim().toLowerCase(),
-        password_hash: hashPassword(password),
+        password_hash: hashedPassword,
         first_name: firstName.trim(),
         last_name: lastName.trim()
       });
@@ -279,7 +286,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       console.log('👤 User found in database:', { id: foundUser.id, username: foundUser.username });
 
       // Verify password
-      if (!foundUser.password_hash || !verifyPassword(password, foundUser.password_hash)) {
+      if (!foundUser.password_hash || !(await verifyPassword(password, foundUser.password_hash))) {
         console.log('❌ Password verification failed');
         return { error: 'Invalid username or password' };
       }
