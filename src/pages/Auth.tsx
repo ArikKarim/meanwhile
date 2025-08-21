@@ -135,6 +135,14 @@ const Auth = () => {
                       placeholder="Your password"
                       required
                     />
+                    <div className="text-right">
+                      <Link 
+                        to="/reset-password-request" 
+                        className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                      >
+                        Forgot your password?
+                      </Link>
+                    </div>
                   </div>
                   <Button type="submit" className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700" disabled={isLoading}>
                     {isLoading ? 'Logging in...' : 'Log In'}

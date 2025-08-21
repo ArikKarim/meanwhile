@@ -229,6 +229,44 @@ export type Database = {
           },
         ]
       }
+      password_reset_tokens: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          token: string
+          updated_at: string
+          used_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          id?: string
+          token: string
+          updated_at?: string
+          used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          token?: string
+          updated_at?: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "password_reset_tokens_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       notepad_operations: {
         Row: {
           id: string
@@ -445,6 +483,33 @@ export type Database = {
         Returns: number
       }
       cleanup_inactive_collaborators: {
+        Args: Record<PropertyKey, never>
+        Returns: number
+      }
+      generate_reset_token: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
+      create_password_reset_request: {
+        Args: {
+          p_username: string
+        }
+        Returns: Json
+      }
+      validate_reset_token: {
+        Args: {
+          p_token: string
+        }
+        Returns: Json
+      }
+      reset_password_with_token: {
+        Args: {
+          p_token: string
+          p_new_password_hash: string
+        }
+        Returns: Json
+      }
+      cleanup_expired_reset_tokens: {
         Args: Record<PropertyKey, never>
         Returns: number
       }
