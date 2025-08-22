@@ -160,6 +160,13 @@ const getTimeBlocks = async (): Promise<StoredTimeBlock[]> => {
 
 const saveTimeBlock = async (timeBlock: Omit<StoredTimeBlock, 'id' | 'created_at'>): Promise<StoredTimeBlock | null> => {
   try {
+    // Try to set session for RLS but don't fail if it doesn't work
+    try {
+      await supabase.rpc('set_session_user', { user_id: timeBlock.user_id });
+    } catch (sessionError) {
+      console.warn('⚠️ Session setup failed, proceeding anyway:', sessionError);
+    }
+    
     const { data, error } = await supabase
       .from('time_blocks')
       .insert([timeBlock])

@@ -44,9 +44,13 @@ export const saveTimeBlocks = async (
   try {
     console.log('💾 Attempting to save time blocks:', { count: timeBlocks.length, timeBlocks });
     
-    // Ensure user session is set for RLS before saving
+    // Try to set user session but don't fail if it doesn't work
     if (timeBlocks.length > 0) {
-      await ensureUserSession(timeBlocks[0].user_id);
+      try {
+        await ensureUserSession(timeBlocks[0].user_id);
+      } catch (sessionError) {
+        console.warn('⚠️ Session setup failed, proceeding without RLS:', sessionError);
+      }
     }
     
     const { data, error } = await supabase
