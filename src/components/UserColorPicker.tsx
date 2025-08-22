@@ -25,11 +25,26 @@ const UserColorPicker: React.FC<UserColorPickerProps> = ({
   
   // State to track the color during dragging for real-time hex display
   const [displayColor, setDisplayColor] = useState(currentColor);
+  const [isDragging, setIsDragging] = useState(false);
   
-  // Update display color when the actual color changes
+  // Update display color when the actual color changes (but not while dragging)
   useEffect(() => {
-    setDisplayColor(currentColor);
-  }, [currentColor]);
+    if (!isDragging) {
+      console.log('🎨 Updating display color:', currentColor);
+      setDisplayColor(currentColor);
+    }
+  }, [currentColor, isDragging]);
+  
+  // Debug logging
+  useEffect(() => {
+    console.log('🔍 Color picker state:', {
+      currentColor,
+      displayColor,
+      isDragging,
+      userColor,
+      groupColors: groupColors[user?.id || '']
+    });
+  }, [currentColor, displayColor, isDragging, userColor, groupColors, user?.id]);
 
   return (
     <Card>
@@ -50,17 +65,25 @@ const UserColorPicker: React.FC<UserColorPickerProps> = ({
           >
             <input
               type="color"
-              value={currentColor}
+              value={displayColor}
+              onMouseDown={() => setIsDragging(true)}
+              onMouseUp={() => setIsDragging(false)}
               onInput={(e) => {
                 // Update display color immediately during dragging
                 const target = e.target as HTMLInputElement;
+                console.log('🖌️ onInput fired:', target.value);
                 setDisplayColor(target.value);
+                setIsDragging(true);
               }}
               onChange={(e) => {
                 // Update the actual color when user finishes selecting
-                onColorChange(e.target.value);
-                setDisplayColor(e.target.value);
+                const newColor = e.target.value;
+                console.log('✅ onChange fired:', newColor);
+                setDisplayColor(newColor);
+                onColorChange(newColor);
+                setIsDragging(false);
               }}
+              onBlur={() => setIsDragging(false)}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             />
             <div 
