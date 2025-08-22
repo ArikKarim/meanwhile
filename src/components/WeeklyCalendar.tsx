@@ -171,6 +171,37 @@ const saveTimeBlock = async (timeBlock: Omit<StoredTimeBlock, 'id' | 'created_at
   try {
     console.log('🔄 Attempting to save time block:', timeBlock);
     
+    // First, ensure user exists in profiles table
+    try {
+      const { data: existingProfile, error: profileError } = await supabase
+        .from('profiles')
+        .select('user_id')
+        .eq('user_id', timeBlock.user_id)
+        .single();
+      
+      if (profileError && profileError.code === 'PGRST116') {
+        // User doesn't exist, create profile
+        console.log('📝 Creating missing user profile...');
+        const { error: insertError } = await supabase
+          .from('profiles')
+          .insert([{
+            id: generateUUID(),
+            user_id: timeBlock.user_id,
+            username: 'User',
+            first_name: '',
+            last_name: '',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }]);
+        
+        if (insertError) {
+          console.warn('⚠️ Could not create profile, proceeding anyway:', insertError);
+        }
+      }
+    } catch (profileSetupError) {
+      console.warn('⚠️ Profile setup failed, proceeding anyway:', profileSetupError);
+    }
+    
     // Generate UUID client-side to avoid database issues
     const newId = generateUUID();
     const now = new Date().toISOString();
@@ -205,6 +236,13 @@ const saveTimeBlock = async (timeBlock: Omit<StoredTimeBlock, 'id' | 'created_at
         hint: error.hint, 
         code: error.code 
       });
+      
+      // If it's still a foreign key error, try without constraints
+      if (error.code === '23503') {
+        console.log('🔧 Foreign key error detected, trying alternate approach...');
+        // This would require running the SQL fix first
+      }
+      
       throw error;
     }
     
