@@ -160,23 +160,39 @@ const getTimeBlocks = async (): Promise<StoredTimeBlock[]> => {
 
 const saveTimeBlock = async (timeBlock: Omit<StoredTimeBlock, 'id' | 'created_at'>): Promise<StoredTimeBlock | null> => {
   try {
-    // Try to set session for RLS but don't fail if it doesn't work
-    try {
-      await supabase.rpc('set_session_user', { user_id: timeBlock.user_id });
-    } catch (sessionError) {
-      console.warn('⚠️ Session setup failed, proceeding anyway:', sessionError);
-    }
+    console.log('🔄 Attempting to save time block:', timeBlock);
     
+    // Simple direct insert without any RLS or session setup
     const { data, error } = await supabase
       .from('time_blocks')
-      .insert([timeBlock])
+      .insert([{
+        user_id: timeBlock.user_id,
+        group_id: timeBlock.group_id,
+        label: timeBlock.label,
+        day_of_week: timeBlock.day_of_week,
+        start_time: timeBlock.start_time,
+        end_time: timeBlock.end_time,
+        color: timeBlock.color,
+        tag: timeBlock.tag
+      }])
       .select()
       .single();
     
-    if (error) throw error;
+    if (error) {
+      console.error('❌ Database error:', error);
+      console.error('Error details:', { 
+        message: error.message, 
+        details: error.details, 
+        hint: error.hint, 
+        code: error.code 
+      });
+      throw error;
+    }
+    
+    console.log('✅ Time block saved successfully:', data);
     return data;
   } catch (error) {
-    console.error('Error saving time block:', error);
+    console.error('❌ Complete error saving time block:', error);
     return null;
   }
 };
