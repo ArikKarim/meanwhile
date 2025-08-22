@@ -20,6 +20,7 @@ import {
   updateNotepadTitle,
   subscribeToNotepadChanges
 } from '@/services/notepadService';
+import { supabase } from '@/integrations/supabase/client';
 
 interface CollaborativeNotepadProps {
   groupId: string;
@@ -46,6 +47,7 @@ const CollaborativeNotepad: React.FC<CollaborativeNotepadProps> = ({ groupId, on
   const [title, setTitle] = useState('');
   const [editingTitle, setEditingTitle] = useState(false);
   const [collaborators, setCollaborators] = useState<NotepadCollaborator[]>([]);
+  const [saving, setSaving] = useState(false);
   // Cursor tracking disabled
   // const [cursors, setCursors] = useState<CursorPosition[]>([]);
   const [lastSequenceNumber, setLastSequenceNumber] = useState<number>(0);
@@ -88,7 +90,7 @@ const CollaborativeNotepad: React.FC<CollaborativeNotepadProps> = ({ groupId, on
           const initialCollaborators = await getNotepadCollaborators(foundNotepad.id);
           setCollaborators(initialCollaborators);
 
-          // Set up real-time subscriptions
+          // Set up simplified real-time subscriptions
           cleanupRef.current = subscribeToNotepadChanges(
             foundNotepad.id,
             handleNotepadUpdate,
@@ -122,36 +124,44 @@ const CollaborativeNotepad: React.FC<CollaborativeNotepadProps> = ({ groupId, on
     };
   }, [groupId, user]);
 
-  // Real-time event handlers
+  // Real-time event handlers - simplified
   const handleNotepadUpdate = useCallback((updatedNotepad: Notepad) => {
-    if (!isApplyingOperation.current) {
+    // Only update if the content is different and we're not currently editing
+    if (updatedNotepad.content !== content && !isApplyingOperation.current) {
+      console.log('📝 Notepad updated from remote:', updatedNotepad.id);
       setNotepad(updatedNotepad);
       setContent(updatedNotepad.content);
       setTitle(updatedNotepad.title);
     }
-  }, []);
+  }, [content]);
 
+  // Simplified operation handling - just refresh content from server
   const handleOperationUpdate = useCallback((operation: NotepadOperation) => {
     if (operation.user_id === user?.id) return; // Skip our own operations
     
-    setLastSequenceNumber(Math.max(lastSequenceNumber, operation.sequence_number));
+    console.log('🔄 Remote operation detected, refreshing content...');
     
-    // Apply the operation to local content
-    setContent(prevContent => {
-      let newContent = prevContent;
-      
-      if (operation.operation_type === 'insert' && operation.content) {
-        newContent = prevContent.slice(0, operation.position) + 
-                    operation.content + 
-                    prevContent.slice(operation.position);
-      } else if (operation.operation_type === 'delete' && operation.length) {
-        newContent = prevContent.slice(0, operation.position) + 
-                    prevContent.slice(operation.position + operation.length);
+    // Simple approach: fetch latest content instead of applying operations
+    const refreshContent = async () => {
+      try {
+        const { data: freshNotepad, error } = await supabase
+          .from('notepads')
+          .select('*')
+          .eq('id', notepad?.id)
+          .single();
+        
+        if (!error && freshNotepad && freshNotepad.content !== content) {
+          setContent(freshNotepad.content);
+          setNotepad(freshNotepad);
+        }
+      } catch (error) {
+        console.error('Error refreshing notepad content:', error);
       }
-      
-      return newContent;
-    });
-  }, [user?.id, lastSequenceNumber]);
+    };
+    
+    // Debounce refresh to avoid too many calls
+    setTimeout(refreshContent, 500);
+  }, [user?.id, notepad?.id, content]);
 
   // Cursor update handler disabled
   const handleCursorUpdate = useCallback((cursor: NotepadCursor) => {
@@ -178,79 +188,55 @@ const CollaborativeNotepad: React.FC<CollaborativeNotepadProps> = ({ groupId, on
   //   [notepad]
   // );
 
-  // Handle text changes
-  const handleContentChange = async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  // Debounced save function to reduce database calls
+  const debouncedSave = useCallback(
+    debounce(async (content: string) => {
+      if (!notepad || !user) return;
+      
+      try {
+        setSaving(true);
+        console.log('💾 Saving notepad content...');
+        
+        // Simple direct content update to avoid operational transform complexity
+        const { error } = await supabase
+          .from('notepads')
+          .update({ 
+            content: content, 
+            last_updated_by: user.id,
+            updated_at: new Date().toISOString() 
+          })
+          .eq('id', notepad.id);
+        
+        if (error) {
+          console.error('❌ Error saving notepad content:', error);
+          toast({
+            title: 'Save failed',
+            description: 'Failed to save notepad changes',
+            variant: 'destructive'
+          });
+        } else {
+          console.log('✅ Notepad content saved successfully');
+        }
+      } catch (error) {
+        console.error('❌ Error in debouncedSave:', error);
+      } finally {
+        setSaving(false);
+      }
+    }, 1000), // Save after 1 second of no changes
+    [notepad, user, toast]
+  );
+
+  // Handle text changes - simplified approach
+  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (!notepad || !user) return;
 
     const newContent = e.target.value;
-    const prevContent = content;
     
-    // Find the difference and create operation
-    let operationType: 'insert' | 'delete' = 'insert';
-    let position = 0;
-    let operationContent = '';
-    let operationLength = 0;
-
-    if (newContent.length > prevContent.length) {
-      // Insert operation
-      operationType = 'insert';
-      // Find insertion point
-      for (let i = 0; i < Math.min(newContent.length, prevContent.length); i++) {
-        if (newContent[i] !== prevContent[i]) {
-          position = i;
-          break;
-        }
-      }
-      if (position === 0 && newContent.length > prevContent.length) {
-        position = prevContent.length;
-      }
-      operationContent = newContent.slice(position, position + (newContent.length - prevContent.length));
-    } else if (newContent.length < prevContent.length) {
-      // Delete operation
-      operationType = 'delete';
-      // Find deletion point
-      for (let i = 0; i < Math.min(newContent.length, prevContent.length); i++) {
-        if (newContent[i] !== prevContent[i]) {
-          position = i;
-          break;
-        }
-      }
-      if (position === 0 && newContent.length < prevContent.length) {
-        position = newContent.length;
-      }
-      operationLength = prevContent.length - newContent.length;
-    }
-
     // Update local content immediately for responsive UI
     setContent(newContent);
-
-    // Apply operation to database
-    if (operationType === 'insert' && operationContent) {
-      isApplyingOperation.current = true;
-      const { sequenceNumber } = await applyNotepadOperation(
-        notepad.id, 
-        'insert', 
-        position, 
-        operationContent
-      );
-      if (sequenceNumber) {
-        setLastSequenceNumber(sequenceNumber);
-      }
-      isApplyingOperation.current = false;
-    } else if (operationType === 'delete' && operationLength > 0) {
-      isApplyingOperation.current = true;
-      const { sequenceNumber } = await applyNotepadOperation(
-        notepad.id, 
-        'delete', 
-        position, 
-        undefined, 
-        operationLength
-      );
-      if (sequenceNumber) {
-        setLastSequenceNumber(sequenceNumber);
-      }
-      isApplyingOperation.current = false;
-    }
+    
+    // Debounced save to database
+    debouncedSave(newContent);
   };
 
   // Handle cursor position changes (disabled)
@@ -416,12 +402,23 @@ const CollaborativeNotepad: React.FC<CollaborativeNotepadProps> = ({ groupId, on
           {/* Cursor rendering disabled */}
         </div>
         
-        <div className="mt-2 text-xs text-muted-foreground">
-          {notepad.last_updated_by && (
-            <span>
-              Last updated by {collaborators.find(c => c.user_id === notepad.last_updated_by)?.user_name || 'Unknown'}
-            </span>
-          )}
+        <div className="mt-2 flex justify-between items-center text-xs text-muted-foreground">
+          <span>
+            {notepad.last_updated_by && (
+              <>Last updated by {collaborators.find(c => c.user_id === notepad.last_updated_by)?.user_name || 'Unknown'}</>
+            )}
+          </span>
+          <span className="flex items-center gap-1">
+            {saving && (
+              <>
+                <div className="animate-spin rounded-full h-3 w-3 border-b border-primary"></div>
+                Saving...
+              </>
+            )}
+            {!saving && (
+              <span className="text-green-600">✓ Saved</span>
+            )}
+          </span>
         </div>
       </CardContent>
     </Card>
