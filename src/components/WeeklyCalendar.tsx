@@ -158,23 +158,42 @@ const getTimeBlocks = async (): Promise<StoredTimeBlock[]> => {
   }
 };
 
+// Generate UUID client-side to avoid database default issues
+const generateUUID = (): string => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
 const saveTimeBlock = async (timeBlock: Omit<StoredTimeBlock, 'id' | 'created_at'>): Promise<StoredTimeBlock | null> => {
   try {
     console.log('🔄 Attempting to save time block:', timeBlock);
     
-    // Simple direct insert without any RLS or session setup
+    // Generate UUID client-side to avoid database issues
+    const newId = generateUUID();
+    const now = new Date().toISOString();
+    
+    const blockToInsert = {
+      id: newId,
+      user_id: timeBlock.user_id,
+      group_id: timeBlock.group_id,
+      label: timeBlock.label,
+      day_of_week: timeBlock.day_of_week,
+      start_time: timeBlock.start_time,
+      end_time: timeBlock.end_time,
+      color: timeBlock.color,
+      tag: timeBlock.tag,
+      created_at: now,
+      updated_at: now
+    };
+    
+    console.log('📝 Inserting time block with explicit ID:', blockToInsert);
+    
     const { data, error } = await supabase
       .from('time_blocks')
-      .insert([{
-        user_id: timeBlock.user_id,
-        group_id: timeBlock.group_id,
-        label: timeBlock.label,
-        day_of_week: timeBlock.day_of_week,
-        start_time: timeBlock.start_time,
-        end_time: timeBlock.end_time,
-        color: timeBlock.color,
-        tag: timeBlock.tag
-      }])
+      .insert([blockToInsert])
       .select()
       .single();
     

@@ -34,26 +34,43 @@ export const getTimeBlocks = async (): Promise<TimeBlock[]> => {
 /**
  * Save multiple time blocks
  */
+// Generate UUID client-side to avoid database default issues
+const generateUUID = (): string => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
 export const saveTimeBlocks = async (
   timeBlocks: Omit<TimeBlock, 'id' | 'created_at'>[]
 ): Promise<TimeBlock[]> => {
   try {
-    console.log('💾 Attempting to save time blocks (simplified):', { count: timeBlocks.length, timeBlocks });
+    console.log('💾 Attempting to save time blocks with client-side UUIDs:', { count: timeBlocks.length, timeBlocks });
     
-    // Skip all session/RLS setup completely
+    const now = new Date().toISOString();
+    
+    // Generate UUIDs client-side to avoid database issues
+    const blocksWithIds = timeBlocks.map(block => ({
+      id: generateUUID(),
+      user_id: block.user_id,
+      group_id: block.group_id,
+      label: block.label,
+      day_of_week: block.day_of_week,
+      start_time: block.start_time,
+      end_time: block.end_time,
+      color: block.color,
+      tag: block.tag,
+      created_at: now,
+      updated_at: block.updated_at || now
+    }));
+    
+    console.log('📝 Inserting blocks with explicit IDs:', blocksWithIds);
+    
     const { data, error } = await supabase
       .from('time_blocks')
-      .insert(timeBlocks.map(block => ({
-        user_id: block.user_id,
-        group_id: block.group_id,
-        label: block.label,
-        day_of_week: block.day_of_week,
-        start_time: block.start_time,
-        end_time: block.end_time,
-        color: block.color,
-        tag: block.tag,
-        updated_at: block.updated_at
-      })))
+      .insert(blocksWithIds)
       .select();
     
     if (error) {
