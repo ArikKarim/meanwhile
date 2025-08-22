@@ -8,6 +8,8 @@ import type { Notepad, NotepadOperation, NotepadCursor, NotepadCollaborator } fr
  */
 export const createOrGetGroupNotepad = async (groupId: string): Promise<{ notepad: Notepad | null; error?: string }> => {
   try {
+    console.log('🔄 Creating or getting notepad for group:', groupId);
+    
     // First try to get existing notepad
     const { data: existingNotepad, error: fetchError } = await supabase
       .from('notepads')
@@ -16,15 +18,38 @@ export const createOrGetGroupNotepad = async (groupId: string): Promise<{ notepa
       .single();
 
     if (!fetchError && existingNotepad) {
+      console.log('✅ Found existing notepad:', existingNotepad.id);
       return { notepad: existingNotepad };
     }
 
-    // Create new notepad using the database function
+    console.log('📝 Creating new notepad for group...');
+    
+    // Try to create directly first (simpler approach)
+    const { data: directCreate, error: directError } = await supabase
+      .from('notepads')
+      .insert([{
+        group_id: groupId,
+        title: 'Group Notes',
+        content: '',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }])
+      .select()
+      .single();
+
+    if (!directError && directCreate) {
+      console.log('✅ Created notepad directly:', directCreate.id);
+      return { notepad: directCreate };
+    }
+
+    console.log('⚠️ Direct creation failed, trying RPC function...', directError);
+
+    // Fall back to RPC function
     const { data: notepadId, error: createError } = await supabase
       .rpc('create_group_notepad', { p_group_id: groupId });
 
     if (createError) {
-      console.error('Error creating notepad:', createError);
+      console.error('❌ Error creating notepad via RPC:', createError);
       return { notepad: null, error: createError.message };
     }
 
@@ -36,13 +61,14 @@ export const createOrGetGroupNotepad = async (groupId: string): Promise<{ notepa
       .single();
 
     if (newFetchError) {
-      console.error('Error fetching created notepad:', newFetchError);
+      console.error('❌ Error fetching created notepad:', newFetchError);
       return { notepad: null, error: newFetchError.message };
     }
 
+    console.log('✅ Created notepad via RPC:', newNotepad.id);
     return { notepad: newNotepad };
   } catch (error) {
-    console.error('Error in createOrGetGroupNotepad:', error);
+    console.error('❌ Error in createOrGetGroupNotepad:', error);
     return { 
       notepad: null, 
       error: error instanceof Error ? error.message : 'Failed to create or get notepad' 
@@ -147,6 +173,42 @@ export const applyNotepadOperation = async (
   length?: number
 ): Promise<{ sequenceNumber: number | null; error?: string }> => {
   try {
+    console.log('🔄 Applying notepad operation:', { notepadId, operationType, position, content, length });
+    
+    // Try direct database operations first for better reliability
+    if (operationType === 'insert' && content) {
+      // Get current content
+      const { data: notepad, error: fetchError } = await supabase
+        .from('notepads')
+        .select('content')
+        .eq('id', notepadId)
+        .single();
+      
+      if (fetchError) {
+        console.error('❌ Error fetching notepad for direct operation:', fetchError);
+      } else {
+        const currentContent = notepad.content || '';
+        const newContent = currentContent.slice(0, position) + content + currentContent.slice(position);
+        
+        // Update directly
+        const { error: updateError } = await supabase
+          .from('notepads')
+          .update({ 
+            content: newContent, 
+            updated_at: new Date().toISOString() 
+          })
+          .eq('id', notepadId);
+        
+        if (!updateError) {
+          console.log('✅ Applied operation directly');
+          return { sequenceNumber: Date.now() }; // Use timestamp as sequence
+        }
+        
+        console.warn('⚠️ Direct update failed, trying RPC...', updateError);
+      }
+    }
+
+    // Fall back to RPC function
     const { data: sequenceNumber, error } = await supabase.rpc('apply_notepad_operation', {
       p_notepad_id: notepadId,
       p_operation_type: operationType,
@@ -156,13 +218,14 @@ export const applyNotepadOperation = async (
     });
 
     if (error) {
-      console.error('Error applying operation:', error);
+      console.error('❌ Error applying operation via RPC:', error);
       return { sequenceNumber: null, error: error.message };
     }
 
+    console.log('✅ Applied operation via RPC, sequence:', sequenceNumber);
     return { sequenceNumber };
   } catch (error) {
-    console.error('Error in applyNotepadOperation:', error);
+    console.error('❌ Error in applyNotepadOperation:', error);
     return { 
       sequenceNumber: null, 
       error: error instanceof Error ? error.message : 'Failed to apply operation' 
