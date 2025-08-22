@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Palette } from 'lucide-react';
 import { getUserColorForGroup } from '@/utils/colorUtils';
@@ -22,6 +22,14 @@ const UserColorPicker: React.FC<UserColorPickerProps> = ({
   const currentColor = selectedGroupId && user?.id 
     ? getUserColorForGroup(user.id, groupColors) 
     : userColor;
+  
+  // State to track the color during dragging for real-time hex display
+  const [displayColor, setDisplayColor] = useState(currentColor);
+  
+  // Update display color when the actual color changes
+  useEffect(() => {
+    setDisplayColor(currentColor);
+  }, [currentColor]);
 
   return (
     <Card>
@@ -43,17 +51,26 @@ const UserColorPicker: React.FC<UserColorPickerProps> = ({
             <input
               type="color"
               value={currentColor}
-              onChange={(e) => onColorChange(e.target.value)}
+              onInput={(e) => {
+                // Update display color immediately during dragging
+                const target = e.target as HTMLInputElement;
+                setDisplayColor(target.value);
+              }}
+              onChange={(e) => {
+                // Update the actual color when user finishes selecting
+                onColorChange(e.target.value);
+                setDisplayColor(e.target.value);
+              }}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             />
             <div 
               className="w-full h-full rounded-lg"
-              style={{ backgroundColor: currentColor }}
+              style={{ backgroundColor: displayColor }}
             />
           </div>
           <div className="flex-1">
             <p className="text-sm font-medium text-gray-900">
-              {currentColor.toUpperCase()}
+              {displayColor.toUpperCase()}
             </p>
             <p className="text-xs text-muted-foreground">
               Each user must have a unique color in this group
