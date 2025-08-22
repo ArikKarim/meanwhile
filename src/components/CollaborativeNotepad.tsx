@@ -46,7 +46,8 @@ const CollaborativeNotepad: React.FC<CollaborativeNotepadProps> = ({ groupId, on
   const [title, setTitle] = useState('');
   const [editingTitle, setEditingTitle] = useState(false);
   const [collaborators, setCollaborators] = useState<NotepadCollaborator[]>([]);
-  const [cursors, setCursors] = useState<CursorPosition[]>([]);
+  // Cursor tracking disabled
+  // const [cursors, setCursors] = useState<CursorPosition[]>([]);
   const [lastSequenceNumber, setLastSequenceNumber] = useState<number>(0);
   
   // Refs
@@ -83,21 +84,9 @@ const CollaborativeNotepad: React.FC<CollaborativeNotepadProps> = ({ groupId, on
           
           await joinNotepadCollaboration(foundNotepad.id, userName, userColor);
           
-          // Load initial collaborators and cursors
-          const [initialCollaborators, initialCursors] = await Promise.all([
-            getNotepadCollaborators(foundNotepad.id),
-            getNotepadCursors(foundNotepad.id)
-          ]);
-          
+          // Load initial collaborators (cursors disabled)
+          const initialCollaborators = await getNotepadCollaborators(foundNotepad.id);
           setCollaborators(initialCollaborators);
-          setCursors(initialCursors.map(cursor => ({
-            userId: cursor.user_id,
-            userName: initialCollaborators.find(c => c.user_id === cursor.user_id)?.user_name || 'Unknown',
-            userColor: initialCollaborators.find(c => c.user_id === cursor.user_id)?.user_color || '#3b82f6',
-            position: cursor.position,
-            selectionStart: cursor.selection_start || undefined,
-            selectionEnd: cursor.selection_end || undefined
-          })));
 
           // Set up real-time subscriptions
           cleanupRef.current = subscribeToNotepadChanges(
@@ -164,27 +153,10 @@ const CollaborativeNotepad: React.FC<CollaborativeNotepadProps> = ({ groupId, on
     });
   }, [user?.id, lastSequenceNumber]);
 
+  // Cursor update handler disabled
   const handleCursorUpdate = useCallback((cursor: NotepadCursor) => {
-    if (cursor.user_id === user?.id) return; // Skip our own cursor
-    
-    setCursors(prevCursors => {
-      const otherCursors = prevCursors.filter(c => c.userId !== cursor.user_id);
-      const collaborator = collaborators.find(c => c.user_id === cursor.user_id);
-      
-      if (collaborator) {
-        return [...otherCursors, {
-          userId: cursor.user_id,
-          userName: collaborator.user_name,
-          userColor: collaborator.user_color,
-          position: cursor.position,
-          selectionStart: cursor.selection_start || undefined,
-          selectionEnd: cursor.selection_end || undefined
-        }];
-      }
-      
-      return otherCursors;
-    });
-  }, [user?.id, collaborators]);
+    // Cursor tracking disabled - no action taken
+  }, []);
 
   const handleCollaboratorUpdate = useCallback((collaborator: NotepadCollaborator) => {
     setCollaborators(prevCollaborators => {
@@ -196,15 +168,15 @@ const CollaborativeNotepad: React.FC<CollaborativeNotepadProps> = ({ groupId, on
     });
   }, []);
 
-  // Debounced cursor position update
-  const debouncedUpdateCursor = useCallback(
-    debounce(async (position: number, selectionStart?: number, selectionEnd?: number) => {
-      if (notepad) {
-        await updateCursorPosition(notepad.id, position, selectionStart, selectionEnd);
-      }
-    }, 100),
-    [notepad]
-  );
+  // Cursor position update disabled
+  // const debouncedUpdateCursor = useCallback(
+  //   debounce(async (position: number, selectionStart?: number, selectionEnd?: number) => {
+  //     if (notepad) {
+  //       await updateCursorPosition(notepad.id, position, selectionStart, selectionEnd);
+  //     }
+  //   }, 100),
+  //   [notepad]
+  // );
 
   // Handle text changes
   const handleContentChange = async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -281,20 +253,14 @@ const CollaborativeNotepad: React.FC<CollaborativeNotepadProps> = ({ groupId, on
     }
   };
 
-  // Handle cursor position changes
+  // Handle cursor position changes (disabled)
   const handleSelectionChange = useCallback(() => {
+    // Cursor tracking disabled - no longer sending cursor position updates
     if (textareaRef.current) {
       const start = textareaRef.current.selectionStart;
-      const end = textareaRef.current.selectionEnd;
       currentCursorPosition.current = start;
-      
-      debouncedUpdateCursor(
-        start, 
-        start !== end ? start : undefined, 
-        start !== end ? end : undefined
-      );
     }
-  }, [debouncedUpdateCursor]);
+  }, []);
 
   // Handle title update
   const handleTitleSave = async () => {
@@ -447,27 +413,7 @@ const CollaborativeNotepad: React.FC<CollaborativeNotepadProps> = ({ groupId, on
             }}
           />
           
-          {/* Render other users' cursors */}
-          {cursors.map((cursor) => (
-            <div
-              key={cursor.userId}
-              className="absolute pointer-events-none"
-              style={{
-                left: '1rem', // Approximate position - would need more complex calculation
-                top: `${1 + (cursor.position * 1.5)}rem`, // Rough calculation
-                borderLeft: `2px solid ${cursor.userColor}`,
-                height: '1.5rem',
-                zIndex: 10
-              }}
-            >
-              <div 
-                className="absolute -top-6 left-0 px-1 py-0.5 text-xs text-white rounded"
-                style={{ backgroundColor: cursor.userColor }}
-              >
-                {cursor.userName}
-              </div>
-            </div>
-          ))}
+          {/* Cursor rendering disabled */}
         </div>
         
         <div className="mt-2 text-xs text-muted-foreground">
