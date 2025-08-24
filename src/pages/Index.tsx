@@ -742,6 +742,7 @@ const Index = () => {
                       weekStartDay={getCurrentGroupTimeSettings(selectedGroupId).weekStartDay}
                       userColors={userColors}
                       groupColors={groupColors}
+                      isAdmin={isAdmin}
                     />
                   </div>
                 </div>

@@ -29,6 +29,7 @@ interface WeeklyCalendarProps {
   weekStartDay?: 'sunday' | 'monday';
   userColors?: UserColors;
   groupColors?: {[userId: string]: string};
+  isAdmin?: boolean;
 }
 
 const DAYS_SUNDAY_START = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -364,7 +365,7 @@ const getDisplayName = (user: StoredUser | undefined): string => {
   return user.username;
 };
 
-const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHour = 21, weekStartDay = 'sunday', userColors: propUserColors, groupColors }: WeeklyCalendarProps) => {
+const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHour = 21, weekStartDay = 'sunday', userColors: propUserColors, groupColors, isAdmin = false }: WeeklyCalendarProps) => {
   // Get the correct days array based on week start preference
   const DAYS = weekStartDay === 'monday' ? DAYS_MONDAY_START : DAYS_SUNDAY_START;
   
@@ -375,6 +376,20 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     }
     // Fallback to prop colors or default
     return (propUserColors && propUserColors[userId]) || DEFAULT_COLORS[0];
+  };
+
+  // Helper to check if current user can edit a block
+  const canEditBlock = (block: TimeBlock): boolean => {
+    if (!user?.id) return false;
+    // User can edit if they own the block OR if they're an admin
+    return block.user_id === user.id || isAdmin;
+  };
+
+  // Helper to check if current user can edit only the name of a block
+  const canEditBlockName = (block: TimeBlock): boolean => {
+    if (!user?.id) return false;
+    // User can edit name if they own the block OR if they're an admin
+    return block.user_id === user.id || isAdmin;
   };
   
   // Helper function to convert UI day index to storage day index (0=Sunday, 1=Monday, etc.)
@@ -490,10 +505,26 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
     if (!editingBlock || !user) return;
 
     try {
-      const updates = {
-        ...editForm,
-        color: user?.id ? getUserColorForGroup(user.id) : getUserColor(user?.id || '') // Always use group-specific or UUID-based color for consistency
-      };
+      const isOwner = editingBlock.user_id === user.id;
+      const isAdminEdit = !isOwner && isAdmin;
+      
+      let updates;
+      
+      if (isOwner) {
+        // Owner can edit all fields
+        updates = {
+          ...editForm,
+          color: user?.id ? getUserColorForGroup(user.id) : getUserColor(user?.id || '')
+        };
+      } else if (isAdminEdit) {
+        // Admin can only edit the name
+        updates = {
+          label: editForm.label
+        };
+      } else {
+        // Should not happen due to UI restrictions, but safety check
+        throw new Error('You do not have permission to edit this activity');
+      }
       
       const result = await updateTimeBlock(editingBlock.id, updates);
       
@@ -1405,26 +1436,38 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
       }}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>
-              {editingBlock?.user_id === user?.id ? 'Edit Activity' : 'View Activity'}
+            <DialogTitle className="flex items-center gap-2">
+              {editingBlock && canEditBlock(editingBlock) ? 'Edit Activity' : 'View Activity'}
+              {editingBlock && isAdmin && editingBlock.user_id !== user?.id && (
+                <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-1 rounded">
+                  Admin Edit
+                </span>
+              )}
             </DialogTitle>
             <DialogDescription>
-              {editingBlock?.user_id === user?.id 
-                ? 'Make changes to your activity. Click save when you\'re done.'
+              {editingBlock && canEditBlock(editingBlock)
+                ? (editingBlock.user_id === user?.id 
+                   ? 'Make changes to your activity. Click save when you\'re done.'
+                   : 'As a group admin, you can edit the name of this activity.')
                 : 'Activity details (read-only)'
               }
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="edit-label">Activity Name</Label>
+              <Label htmlFor="edit-label">
+                Activity Name
+                {editingBlock && isAdmin && editingBlock.user_id !== user?.id && (
+                  <span className="text-xs text-blue-600 font-normal ml-1">(admin editable)</span>
+                )}
+              </Label>
               <Input
                 id="edit-label"
                 value={editForm.label}
                 onChange={(e) => setEditForm(prev => ({ ...prev, label: e.target.value }))}
                 placeholder="What are you doing?"
-                readOnly={editingBlock?.user_id !== user?.id}
-                className={editingBlock?.user_id !== user?.id ? 'bg-gray-50' : ''}
+                readOnly={editingBlock ? !canEditBlockName(editingBlock) : true}
+                className={editingBlock && !canEditBlockName(editingBlock) ? 'bg-gray-50' : ''}
               />
             </div>
             {editingBlock?.displayName && (
@@ -1484,7 +1527,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
               </div>
               
               <div className="flex gap-2 pt-4">
-                {editingBlock?.user_id === user?.id ? (
+                {editingBlock && canEditBlock(editingBlock) ? (
                   <Button type="button" onClick={handleUpdateBlock} disabled={loading}>
                     {loading ? 'Updating...' : 'Update Block'}
                   </Button>
@@ -1494,7 +1537,7 @@ const WeeklyCalendar = ({ groupId, viewMode, visibleUsers, startHour = 7, endHou
                   variant="outline" 
                   onClick={() => setEditingBlock(null)}
                 >
-                  {editingBlock?.user_id === user?.id ? 'Cancel' : 'Close'}
+                  {editingBlock && canEditBlock(editingBlock) ? 'Cancel' : 'Close'}
                 </Button>
               </div>
             </div>
