@@ -11,7 +11,7 @@ export const fetchGroupColors = async (groupId: string): Promise<UserColors> => 
   try {
     const { data, error } = await supabase
       .from('user_group_colors')
-      .select('user_id, color, user_name')
+      .select('user_id, color')
       .eq('group_id', groupId);
     
     if (error) throw error;

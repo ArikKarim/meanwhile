@@ -19,10 +19,10 @@ const config: Config = {
     },
     extend: {
       fontFamily: {
-        'heading': ['Instrument Serif', 'Georgia', 'serif'],
-        'body': ['Geist', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-        'sans': ['Geist', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-        'serif': ['Instrument Serif', 'Georgia', 'serif'],
+        'heading': ['Georgia', 'Times New Roman', 'serif'],
+        'body': ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+        'sans': ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
+        'serif': ['Georgia', 'Times New Roman', 'serif'],
       },
       colors: {
         border: "hsl(var(--border))",

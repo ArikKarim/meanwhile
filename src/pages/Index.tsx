@@ -22,7 +22,7 @@ import { getUserColorFromId, getUserColorForGroup, getDisplayName } from '@/util
 import { getCalendarSettings, saveCalendarSettings, getGroupTimeSettings } from '@/utils/storageUtils';
 import { formatTime } from '@/utils/timeUtils';
 import { debounce } from '@/utils/debounce';
-import { fetchGroupColors, setUserColorForGroup } from '@/services/groupColorService';
+import { fetchGroupColors, setUserColorForGroup, ensureUserColorInDatabase } from '@/services/groupColorService';
 import { copyScheduleToGroup } from '@/services/scheduleService';
 
 
@@ -60,6 +60,7 @@ const Index = () => {
   const [groupColors, setGroupColors] = useState<UserColors>({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [showNotepad, setShowNotepad] = useState(false);
+  const [isColorPickerActive, setIsColorPickerActive] = useState(false);
 
   // Initialize user color
   useEffect(() => {
@@ -154,22 +155,59 @@ const Index = () => {
         // Fetch group-specific colors from database
         const groupColorsFromDB = await fetchGroupColors(selectedGroupId);
         
-        // Use existing colors from database, fallback to consistent hash-based colors
+        // Use existing colors from database, ensure all members have colors assigned
         const updatedColors: UserColors = {};
         const finalGroupColors: {[userId: string]: string} = {};
         
+        // Keep track of used colors to avoid duplicates
+        const usedColors = new Set<string>();
+        const availableColors = [
+          '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', 
+          '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1', 
+          '#14b8a6', '#f43f5e'
+        ];
+        
         for (const member of members) {
           let memberColor = groupColorsFromDB[member.id];
+          
           if (!memberColor) {
-            // Use consistent hash-based color instead of random assignment
-            memberColor = getUserColorFromId(member.id);
+            // Find an available color that hasn't been used
+            const availableColor = availableColors.find(color => 
+              !usedColors.has(color.toLowerCase()) && 
+              !Object.values(groupColorsFromDB).some(dbColor => dbColor?.toLowerCase() === color.toLowerCase())
+            );
+            
+            if (availableColor) {
+              memberColor = availableColor;
+              
+              // Try to save to database
+              try {
+                const result = await setUserColorForGroup(member.id, selectedGroupId, memberColor);
+                if (!result.success) {
+                  // Continue with the color anyway for UI consistency
+                  console.warn(`Failed to save color for ${member.username}:`, result.error);
+                }
+              } catch (error) {
+                console.warn(`Error saving color for ${member.username}:`, error);
+              }
+            } else {
+              // All predefined colors taken, use hash-based color
+              memberColor = getUserColorFromId(member.id);
+            }
           }
+          
+          usedColors.add(memberColor.toLowerCase());
           updatedColors[member.id] = memberColor;
           finalGroupColors[member.id] = memberColor;
         }
         
         setUserColors(updatedColors);
         setGroupColors(finalGroupColors);
+        
+        // Ensure current user's color state is updated if they're in this group
+        if (user?.id && finalGroupColors[user.id]) {
+          setUserColor(finalGroupColors[user.id]);
+        }
         
       } catch (error) {
         console.error('Error fetching group members:', error);
@@ -202,15 +240,24 @@ const Index = () => {
             // Refresh group colors when any color changes in this group
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE' || payload.eventType === 'DELETE') {
               const updatedGroupColors = await fetchGroupColors(selectedGroupId);
+              
+              // Always update the group colors state for other users
               setGroupColors(updatedGroupColors);
               setUserColors(updatedGroupColors);
               
-              // Update current user's color state if it changed
+              // Check if this change was from the current user
+              const isOwnChange = payload.new && (payload.new as any).user_id === user?.id;
+              
+              // Only update current user's color state if:
+              // 1. They're not actively using the color picker, OR
+              // 2. This change was from another user (not themselves)
               if (user?.id && updatedGroupColors[user.id]) {
-                setUserColor(updatedGroupColors[user.id]);
+                if (!isColorPickerActive || !isOwnChange) {
+                  setUserColor(updatedGroupColors[user.id]);
+                }
               }
               
-              console.log('Group colors updated from real-time event:', updatedGroupColors);
+
             }
           } catch (error) {
             console.error('Error handling real-time color update:', error);
@@ -224,7 +271,7 @@ const Index = () => {
     return () => {
       subscription.unsubscribe();
     };
-  }, [selectedGroupId, user?.id]);
+  }, [selectedGroupId, user?.id, isColorPickerActive]);
 
 
 
@@ -281,11 +328,9 @@ const Index = () => {
       }
       
       const normalizedColor = (newColor || '').toLowerCase();
-      console.log('Starting debounced color update:', { userId: user.id, groupId: selectedGroupId, newColor: normalizedColor });
       
       try {
         // Update group-specific color using the atomic RPC
-        console.log('Saving color to database via RPC...');
         const result = await setUserColorForGroup(user.id, selectedGroupId, normalizedColor);
         
         if (!result.success) {
@@ -319,42 +364,58 @@ const Index = () => {
           return;
         }
 
-        console.log('Color saved successfully, updating UI...');
+
         
-        // Refresh group colors from database to ensure consistency
-        try {
-          const updatedGroupColors = await fetchGroupColors(selectedGroupId);
-          setGroupColors(updatedGroupColors);
-          setUserColors(updatedGroupColors);
-        } catch (fetchError) {
-          console.warn('Could not refresh group colors, but color update succeeded:', fetchError);
-        }
+        // Don't refresh from database here - let real-time subscription handle it
+        // Just ensure local state is consistent with what was saved
+        setUserColor(normalizedColor);
+        setUserColors(prev => ({ ...prev, [user.id]: normalizedColor }));
+        setGroupColors(prev => ({ ...prev, [user.id]: normalizedColor }));
         
         // Dispatch custom event to notify other components
         window.dispatchEvent(new CustomEvent('userColorChanged'));
-        
-        console.log('Color update completed successfully');
         toast({
           title: "Color updated",
           description: "Your color has been updated successfully!"
         });
       } catch (error) {
         console.error('Error in updateUserColor:', error);
+        
+        // On error, revert to the color from database
+        try {
+          const currentGroupColors = await fetchGroupColors(selectedGroupId);
+          if (currentGroupColors[user.id]) {
+            setUserColor(currentGroupColors[user.id]);
+            setUserColors(prev => ({ ...prev, [user.id]: currentGroupColors[user.id] }));
+            setGroupColors(prev => ({ ...prev, [user.id]: currentGroupColors[user.id] }));
+          }
+        } catch (revertError) {
+          console.warn('Could not revert color on error:', revertError);
+        }
+        
         toast({
           title: "Error updating color",
           description: `An unexpected error occurred: ${error instanceof Error ? error.message : 'Unknown error'}. Check browser console for details.`,
           variant: "destructive"
         });
+      } finally {
+        // Clear the color picker active state after a delay to prevent race conditions
+        setTimeout(() => {
+          setIsColorPickerActive(false);
+        }, 500);
       }
     }, 1000), // Wait 1 second after user stops dragging
     [user?.id, selectedGroupId]
   );
 
-  // Immediate UI update function (no toast, no database save)
+  // Enhanced color update function that prevents real-time conflicts
   const updateUserColorImmediate = (newColor: string) => {
     if (!user?.id) return;
     
     const normalizedColor = (newColor || '').toLowerCase();
+    
+    // Mark color picker as active to prevent real-time overrides
+    setIsColorPickerActive(true);
     
     // Update local state immediately for smooth UI experience
     setUserColor(normalizedColor);
@@ -670,6 +731,7 @@ const Index = () => {
                     </div>
                   </div>
                   <div className="p-4">
+
                     <WeeklyCalendar 
                       key={selectedGroupId} // Only re-render when group changes
                       groupId={selectedGroupId} 

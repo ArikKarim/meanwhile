@@ -2,68 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Import custom fonts */
-@font-face {
-  font-family: 'Instrument Serif';
-  src: url('/fonts/InstrumentSerif-Regular.woff2') format('woff2'),
-       url('/fonts/InstrumentSerif-Regular.woff') format('woff'),
-       url('/fonts/InstrumentSerif-Regular.ttf') format('truetype');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-  /* Fallback for when font fails to load */
-  unicode-range: U+0000-FFFF;
-}
-
-@font-face {
-  font-family: 'Instrument Serif';
-  src: url('/fonts/InstrumentSerif-Italic.woff2') format('woff2'),
-       url('/fonts/InstrumentSerif-Italic.woff') format('woff'),
-       url('/fonts/InstrumentSerif-Italic.ttf') format('truetype');
-  font-weight: 400;
-  font-style: italic;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Geist';
-  src: url('/fonts/Geist-Regular.woff2') format('woff2'),
-       url('/fonts/Geist-Regular.woff') format('woff'),
-       url('/fonts/Geist-Regular.ttf') format('truetype');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Geist';
-  src: url('/fonts/Geist-Medium.woff2') format('woff2'),
-       url('/fonts/Geist-Medium.woff') format('woff'),
-       url('/fonts/Geist-Medium.ttf') format('truetype');
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Geist';
-  src: url('/fonts/Geist-SemiBold.woff2') format('woff2'),
-       url('/fonts/Geist-SemiBold.woff') format('woff'),
-       url('/fonts/Geist-SemiBold.ttf') format('truetype');
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Geist';
-  src: url('/fonts/Geist-Bold.woff2') format('woff2'),
-       url('/fonts/Geist-Bold.woff') format('woff'),
-       url('/fonts/Geist-Bold.ttf') format('truetype');
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
+/* System fonts for better performance and reliability */
 
 /* Tracing animation keyframes */
 @keyframes trace-gradient {
